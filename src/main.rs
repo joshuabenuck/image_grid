@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use ggez::event::{self, KeyCode, KeyMods};
+use ggez::event::{self, KeyCode, KeyMods, MouseButton};
 use ggez::{self, filesystem, graphics, timer, Context, GameResult};
 use image::imageops;
 use mint;
@@ -25,6 +25,7 @@ struct Grid {
     highlight_border: usize,
     tiles_per_row: usize,
     margin_to_center: usize,
+    coords_to_select: Option<(f32, f32)>,
 }
 
 impl Grid {
@@ -44,6 +45,7 @@ impl Grid {
             highlight_border: 2,
             tiles_per_row: 0,
             margin_to_center: 0,
+            coords_to_select: None,
         }
     }
 
@@ -57,7 +59,7 @@ impl Grid {
         graphics::draw(ctx, image, graphics::DrawParam::default().dest(dest_point))
     }
 
-    fn draw(&self, ctx: &mut Context) -> GameResult<f32> {
+    fn draw(&mut self, ctx: &mut Context) -> GameResult<f32> {
         let mut x;
         let mut y = self.border_margin as f32;
         let mut scroll_pos = 0.0;
@@ -68,6 +70,16 @@ impl Grid {
                 + i % self.tiles_per_row * self.margin) as f32;
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
+            }
+            if let Some((x_coord, y_coord)) = self.coords_to_select {
+                if x_coord >= x
+                    && x_coord <= x + self.tile_width as f32
+                    && y_coord >= y
+                    && y_coord <= y + self.tile_height as f32
+                {
+                    self.selected_tile = i as isize;
+                    self.coords_to_select = None;
+                }
             }
             self.draw_tile(ctx, x, y, tile)?;
             if i == self.selected_tile as usize {
@@ -113,6 +125,29 @@ impl Grid {
     fn compute_tile_size() {}
 
     fn scroll_by() {}
+
+    fn up(&mut self) {
+        self.selected_tile = max(0 as isize, self.selected_tile - self.tiles_per_row as isize);
+    }
+
+    fn down(&mut self) {
+        self.selected_tile = min(
+            (self.tiles.len() - 1) as isize,
+            self.selected_tile + self.tiles_per_row as isize,
+        );
+    }
+
+    fn left(&mut self) {
+        self.selected_tile = max(0 as isize, self.selected_tile - 1);
+    }
+
+    fn right(&mut self) {
+        self.selected_tile = min((self.tiles.len() - 1) as isize, self.selected_tile + 1);
+    }
+
+    fn select_tile_under(&mut self, x: f32, y: f32) {
+        self.coords_to_select = Some((x, y));
+    }
 }
 
 struct MainState {
@@ -156,29 +191,34 @@ impl event::EventHandler for MainState {
         Ok(())
     }
 
+    fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
+        let screen = graphics::screen_coordinates(ctx);
+        self.grid.select_tile_under(x, y + screen.y);
+    }
+
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+        if y > 0.0 {
+            self.grid.up();
+        }
+        if y < 0.0 {
+            self.grid.down();
+        }
+    }
+
     fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
         println!("{} {}", self.grid.selected_tile, self.grid.tiles_per_row);
         match keycode {
             KeyCode::Up => {
-                self.grid.selected_tile = max(
-                    0 as isize,
-                    self.grid.selected_tile - self.grid.tiles_per_row as isize,
-                );
+                self.grid.up();
             }
             KeyCode::Down => {
-                self.grid.selected_tile = min(
-                    (self.grid.tiles.len() - 1) as isize,
-                    self.grid.selected_tile + self.grid.tiles_per_row as isize,
-                );
+                self.grid.down();
             }
             KeyCode::Left => {
-                self.grid.selected_tile = max(0 as isize, self.grid.selected_tile - 1);
+                self.grid.left();
             }
             KeyCode::Right => {
-                self.grid.selected_tile = min(
-                    (self.grid.tiles.len() - 1) as isize,
-                    self.grid.selected_tile + 1,
-                );
+                self.grid.right();
             }
             _ => {}
         }
