@@ -4,14 +4,20 @@ This is a very early prototype of a image viewing grid widget. It makes use of t
 
 # Running
 
-`image_grid --dir <directory>`
+`image_grid --dir <directory> [--filter <regex>] [--only <regex>] [--max <count>]`
 
-The directory must only contain images. The checked in version will only display the first 10 images. The images displayed will be resized up to 100 / 100 (aspect ratio preserved).
+Images will be displayed at 200px wide.
+
+The directory may contain more than just images, but all files will be parsed as if they are images. Files that fail to parse as images are not included in the display.
+
+To exclude files that match a specific regex from being displayed, pass in one or more `filter` options.
+
+To only display files that match specific patterns, pass in one or more `only` options.
+
+Use the `max` option to put an upper limit on the number of images that will be displayed in the grid.
 
 # Limitations
 
-* Requires that directory only contain images
-* No way to override how many images are displayed
 * Images are displayed at a fixed resolution
 * No way to see full size of image
 * No actions can be taken when an image is selected
