@@ -3,16 +3,17 @@ use ggez::event::{self, KeyCode, KeyMods};
 use ggez::{self, filesystem, graphics, timer, Context, GameResult};
 use image::imageops;
 use mint;
+use regex::Regex;
 use std::cmp::{max, min};
 use std::io::Read;
 use std::path::PathBuf;
-use std::{thread, time};
 
 trait Tile {
     fn image(&self) -> &graphics::Image;
     // eventually add actions here...
 }
 
+// margin: the total space between items the grid
 struct Grid {
     tiles: Vec<graphics::Image>,
     margin: usize,
@@ -30,8 +31,8 @@ impl Grid {
     fn new(images: Vec<graphics::Image>) -> Grid {
         let max_width = images.iter().map(|i| i.width()).fold(0, max);
         let max_height = images.iter().map(|i| i.height()).fold(0, max);
-        let tile_width = min(max_width, 100);
-        let tile_height = min(max_height, 100);
+        let tile_width = min(max_width, 200);
+        let tile_height = min(max_height, 200);
         Grid {
             tiles: images,
             margin: 5,
@@ -46,14 +47,20 @@ impl Grid {
         }
     }
 
+    fn margin<'a>(&'a mut self, m: usize) -> &'a mut Self {
+        self.margin = m;
+        self
+    }
+
     fn draw_tile(&self, ctx: &mut Context, x: f32, y: f32, image: &graphics::Image) -> GameResult {
         let dest_point = mint::Point2 { x, y };
         graphics::draw(ctx, image, graphics::DrawParam::default().dest(dest_point))
     }
 
-    fn draw(&self, ctx: &mut Context) -> GameResult<()> {
+    fn draw(&self, ctx: &mut Context) -> GameResult<f32> {
         let mut x;
         let mut y = self.border_margin as f32;
+        let mut scroll_pos = 0.0;
         for (i, tile) in self.tiles.iter().enumerate() {
             x = (self.margin_to_center
                 + self.border_margin
@@ -71,9 +78,20 @@ impl Grid {
                     self.highlight_color,
                 )?;
                 graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
+                let mut screen = graphics::screen_coordinates(ctx);
+                if y + self.tile_height as f32 > screen.y + screen.h {
+                    screen.y += self.tile_height as f32;
+                    graphics::set_screen_coordinates(ctx, screen)?;
+                    scroll_pos = screen.y;
+                }
+                if y < screen.y {
+                    screen.y -= self.tile_height as f32;
+                    graphics::set_screen_coordinates(ctx, screen)?;
+                    scroll_pos = screen.y;
+                }
             }
         }
-        Ok(())
+        Ok(scroll_pos)
     }
 
     fn resize(&mut self, new_width: f32) {
@@ -97,64 +115,19 @@ impl Grid {
     fn scroll_by() {}
 }
 
-struct WindowSettings {
-    toggle_fullscreen: bool,
-    is_fullscreen: bool,
-    resize_projection: bool,
-}
-
 struct MainState {
     grid: Grid,
-    zoom: f32,
-    window_settings: WindowSettings,
+    scroll_pos: f32,
 }
 
 impl MainState {
-    fn new(ctx: &mut Context) -> GameResult<MainState> {
+    fn new(grid: Grid) -> GameResult<MainState> {
         //filesystem::print_all(ctx);
-        let mut images = Vec::new();
-        let files = filesystem::read_dir(ctx, "/")?;
-        let mut count = 0;
-        for file in files {
-            count += 1;
-            if count > 10 {
-                break;
-            }
-            println!("{:?}", &file);
-            // refactor to resize(ctx, image, max_x, max_y)
-            let image = MainState::load_and_resize_image(ctx, &file)?;
-            images.push(image);
-        }
         Ok(MainState {
-            grid: Grid::new(images),
-            zoom: 1.0,
-            window_settings: WindowSettings {
-                toggle_fullscreen: false,
-                is_fullscreen: false,
-                resize_projection: true,
-            },
+            grid,
+            scroll_pos: 0.0,
         })
     }
-
-    fn load_and_resize_image(ctx: &mut Context, file: &PathBuf) -> GameResult<graphics::Image> {
-        let image = {
-            let mut buf = Vec::new();
-            let mut reader = filesystem::open(ctx, file)?;
-            let _ = reader.read_to_end(&mut buf)?;
-            image::load_from_memory(&buf)?.to_rgba()
-        };
-        let scale: f32 = 100.0 / image.width() as f32;
-        let image = imageops::resize(
-            &image,
-            (image.width() as f32 * scale) as u32,
-            (image.height() as f32 * scale) as u32,
-            image::imageops::FilterType::Nearest,
-        );
-        let (width, height) = image.dimensions();
-        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
-    }
-
-    fn load_image() {}
 }
 
 impl event::EventHandler for MainState {
@@ -176,7 +149,7 @@ impl event::EventHandler for MainState {
         }
         graphics::set_screen_coordinates(ctx, coords)?;*/
         graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
-        self.grid.draw(ctx)?;
+        self.scroll_pos = self.grid.draw(ctx)?;
 
         graphics::present(ctx)?;
         timer::yield_now();
@@ -213,16 +186,115 @@ impl event::EventHandler for MainState {
 
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
         println!("Resized screen to {}, {}", width, height);
-        if self.window_settings.resize_projection {
-            let new_rect = graphics::Rect::new(
-                0.0,
-                0.0,
-                width as f32 * self.zoom,
-                height as f32 * self.zoom,
-            );
-            graphics::set_screen_coordinates(ctx, new_rect).unwrap();
-            self.grid.resize(new_rect.w);
+        let mut screen = graphics::screen_coordinates(ctx);
+        screen.w = width as f32;
+        screen.h = height as f32;
+        graphics::set_screen_coordinates(ctx, screen).unwrap();
+        self.grid.resize(screen.w);
+    }
+}
+
+struct ImageLoader {
+    must_not_match: Vec<String>,
+    must_match: Vec<String>,
+    max_count: Option<usize>,
+    //images: Receiver<image::ImageBuffer>,
+}
+
+impl ImageLoader {
+    fn new() -> ImageLoader {
+        ImageLoader {
+            must_not_match: Vec::new(),
+            must_match: Vec::new(),
+            max_count: None,
         }
+    }
+
+    fn filter(&mut self, filter: &str) {
+        self.must_not_match.push(filter.to_owned());
+    }
+
+    fn only(&mut self, only: &str) {
+        self.must_match.push(only.to_owned());
+    }
+
+    fn max(&mut self, max: usize) {
+        self.max_count = Some(max);
+    }
+
+    fn load_all(&self, ctx: &mut Context) -> GameResult<Vec<graphics::Image>> {
+        let mut images = Vec::new();
+        let files = filesystem::read_dir(ctx, "/")?;
+        let mut count = 0;
+        let must_not_match: Vec<Regex> = self
+            .must_not_match
+            .iter()
+            .map(|f| Regex::new(f).expect(format!("Regex error for 'filter': {}", f).as_str()))
+            .collect();
+        let must_match: Vec<Regex> = self
+            .must_match
+            .iter()
+            .map(|f| Regex::new(f).expect(format!("Regex error for 'only': {}", f).as_str()))
+            .collect();
+        'fileloop: for file in files {
+            // Is there a way to do this more concisely?
+            if let Some(max) = self.max_count {
+                if count >= max {
+                    break;
+                }
+            }
+            //println!("{:?}", &file);
+            // refactor to resize(ctx, image, max_x, max_y)
+            if file.is_dir() {
+                continue;
+            }
+            let filestr = file
+                .to_str()
+                .expect("Unable to convert image filename to str");
+            for regex in &must_match {
+                if !regex.is_match(&filestr) {
+                    continue 'fileloop;
+                }
+            }
+            for regex in &must_not_match {
+                println!("{}, {:?}", &filestr, regex);
+                if regex.is_match(&filestr) {
+                    continue 'fileloop;
+                }
+            }
+            let image = self.load_and_resize(ctx, &file, 200.0);
+            match image {
+                Ok(i) => {
+                    count += 1;
+                    images.push(i);
+                }
+                Err(err) => eprintln!("{}: {}", file.display(), err),
+            }
+        }
+        Ok(images)
+    }
+
+    fn load_and_resize(
+        &self,
+        ctx: &mut Context,
+        file: &PathBuf,
+        max_width: f32,
+    ) -> GameResult<graphics::Image> {
+        let image = {
+            let mut buf = Vec::new();
+            let mut reader = filesystem::open(ctx, file)?;
+            let _ = reader.read_to_end(&mut buf)?;
+            image::load_from_memory(&buf)?.to_rgba()
+        };
+        let scale: f32 = max_width / image.width() as f32;
+        let image = imageops::resize(
+            &image,
+            (image.width() as f32 * scale) as u32,
+            (image.height() as f32 * scale) as u32,
+            image::imageops::FilterType::Nearest,
+        );
+        let (width, height) = image.dimensions();
+        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
     }
 }
 
@@ -235,13 +307,54 @@ fn main() -> GameResult {
                 .short("d")
                 .takes_value(true)
                 .required(true)
-                .help("The directory to display in the grid."),
+                .help("The directory to display."),
+        )
+        .arg(
+            Arg::with_name("max")
+                .long("max")
+                .short("m")
+                .takes_value(true)
+                .required(true)
+                .default_value("100")
+                .help("The maximum number of images to display."),
+        )
+        .arg(
+            Arg::with_name("filter")
+                .long("filter")
+                .short("f")
+                .multiple(true)
+                .takes_value(true)
+                .help("Filter out files that match the regex."),
+        )
+        .arg(
+            Arg::with_name("only")
+                .long("only")
+                .short("o")
+                .multiple(true)
+                .takes_value(true)
+                .help("Only display files that match this regex."),
         )
         .get_matches();
     let cb = ggez::ContextBuilder::new("Image Grid", "Joshua Benuck")
         .add_resource_path(matches.value_of("dir").expect("Must specify a directory!"));
-    let (ctx, event_loop) = &mut cb.build()?;
-    let state = &mut MainState::new(ctx)?;
-    graphics::set_resizable(ctx, true)?;
-    event::run(ctx, event_loop, state)
+    let (mut ctx, mut event_loop) = cb.build()?;
+    let mut loader = ImageLoader::new();
+    if let Some(filters) = matches.values_of("filter") {
+        for filter in filters {
+            loader.filter(filter);
+        }
+    }
+    if let Some(onlys) = matches.values_of("only") {
+        for only in onlys {
+            loader.only(only);
+        }
+    }
+    if let Some(max) = matches.value_of("max") {
+        let max = max.parse().expect("Unable to parse max");
+        loader.max(max);
+    }
+    let grid = Grid::new(loader.load_all(&mut ctx)?);
+    let state = &mut MainState::new(grid)?;
+    graphics::set_resizable(&mut ctx, true)?;
+    event::run(&mut ctx, &mut event_loop, state)
 }
