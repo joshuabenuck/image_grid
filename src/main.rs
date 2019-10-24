@@ -1,21 +1,54 @@
+mod image_loader;
 use clap::{App, Arg};
 use ggez::event::{self, KeyCode, KeyMods, MouseButton};
-use ggez::{self, filesystem, graphics, timer, Context, GameResult};
-use image::imageops;
+use ggez::{self, graphics, timer, Context, GameResult};
+use image_loader::ImageLoader;
 use mint;
-use regex::Regex;
 use std::cmp::{max, min};
-use std::io::Read;
-use std::path::PathBuf;
+
+enum NextAction {
+    None,
+    Push(Box<dyn Widget>),
+    Pop,
+    Replace(Box<dyn Widget>),
+}
+
+trait Widget: event::EventHandler {
+    fn next(&self) -> NextAction;
+}
 
 trait Tile {
     fn image(&self) -> &graphics::Image;
-    // eventually add actions here...
+}
+
+struct ImageViewer {
+    image: graphics::Image,
+}
+
+impl Tile for ImageViewer {
+    fn image(&self) -> &graphics::Image {
+        &self.image
+    }
+}
+
+impl Widget for ImageViewer {
+    fn next(&self) -> NextAction {
+        NextAction::None
+    }
+}
+
+impl event::EventHandler for ImageViewer {
+    fn update(&mut self, _ctx: &mut Context) -> GameResult {
+        Ok(())
+    }
+    fn draw(&mut self, _ctx: &mut Context) -> GameResult {
+        Ok(())
+    }
 }
 
 // margin: the total space between items the grid
 struct Grid {
-    tiles: Vec<graphics::Image>,
+    tiles: Vec<Box<dyn Tile>>,
     margin: usize,
     tile_width: u16,
     tile_height: u16,
@@ -26,16 +59,18 @@ struct Grid {
     tiles_per_row: usize,
     margin_to_center: usize,
     coords_to_select: Option<(f32, f32)>,
+    image_to_view: Option<usize>,
 }
 
 impl Grid {
-    fn new(images: Vec<graphics::Image>) -> Grid {
-        let max_width = images.iter().map(|i| i.width()).fold(0, max);
-        let max_height = images.iter().map(|i| i.height()).fold(0, max);
+    fn new(tiles: Vec<Box<dyn Tile>>) -> Grid {
+        let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
+        let max_width = (&images).iter().map(|i| i.width()).fold(0, max);
+        let max_height = (&images).iter().map(|i| i.height()).fold(0, max);
         let tile_width = min(max_width, 200);
         let tile_height = min(max_height, 200);
         Grid {
-            tiles: images,
+            tiles: tiles,
             margin: 5,
             tile_width,
             tile_height,
@@ -46,6 +81,7 @@ impl Grid {
             tiles_per_row: 0,
             margin_to_center: 0,
             coords_to_select: None,
+            image_to_view: None,
         }
     }
 
@@ -57,53 +93,6 @@ impl Grid {
     fn draw_tile(&self, ctx: &mut Context, x: f32, y: f32, image: &graphics::Image) -> GameResult {
         let dest_point = mint::Point2 { x, y };
         graphics::draw(ctx, image, graphics::DrawParam::default().dest(dest_point))
-    }
-
-    fn draw(&mut self, ctx: &mut Context) -> GameResult<f32> {
-        let mut x;
-        let mut y = self.border_margin as f32;
-        let mut scroll_pos = 0.0;
-        for (i, tile) in self.tiles.iter().enumerate() {
-            x = (self.margin_to_center
-                + self.border_margin
-                + i % self.tiles_per_row * self.tile_width as usize
-                + i % self.tiles_per_row * self.margin) as f32;
-            if i != 0 && i % self.tiles_per_row == 0 {
-                y += (self.margin + self.tile_height as usize) as f32;
-            }
-            if let Some((x_coord, y_coord)) = self.coords_to_select {
-                if x_coord >= x
-                    && x_coord <= x + self.tile_width as f32
-                    && y_coord >= y
-                    && y_coord <= y + self.tile_height as f32
-                {
-                    self.selected_tile = i as isize;
-                    self.coords_to_select = None;
-                }
-            }
-            self.draw_tile(ctx, x, y, tile)?;
-            if i == self.selected_tile as usize {
-                let rectangle = graphics::Mesh::new_rectangle(
-                    ctx,
-                    graphics::DrawMode::stroke(self.highlight_border as f32),
-                    graphics::Rect::new(x, y, self.tile_width as f32, self.tile_height as f32),
-                    self.highlight_color,
-                )?;
-                graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
-                let mut screen = graphics::screen_coordinates(ctx);
-                if y + self.tile_height as f32 > screen.y + screen.h {
-                    screen.y += self.tile_height as f32;
-                    graphics::set_screen_coordinates(ctx, screen)?;
-                    scroll_pos = screen.y;
-                }
-                if y < screen.y {
-                    screen.y -= self.tile_height as f32;
-                    graphics::set_screen_coordinates(ctx, screen)?;
-                    scroll_pos = screen.y;
-                }
-            }
-        }
-        Ok(scroll_pos)
     }
 
     fn resize(&mut self, new_width: f32) {
@@ -150,22 +139,18 @@ impl Grid {
     }
 }
 
-struct MainState {
-    grid: Grid,
-    scroll_pos: f32,
-}
-
-impl MainState {
-    fn new(grid: Grid) -> GameResult<MainState> {
-        //filesystem::print_all(ctx);
-        Ok(MainState {
-            grid,
-            scroll_pos: 0.0,
-        })
+impl Widget for Grid {
+    fn next(&self) -> NextAction {
+        if let Some(index) = self.image_to_view {
+            return NextAction::Push(Box::new(ImageViewer {
+                image: self.tiles[index].image().clone(),
+            }));
+        }
+        return NextAction::None;
     }
 }
 
-impl event::EventHandler for MainState {
+impl event::EventHandler for Grid {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         const DESIRED_FPS: u32 = 20;
         while timer::check_update_time(ctx, DESIRED_FPS) {
@@ -177,14 +162,47 @@ impl event::EventHandler for MainState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        /*let mut coords = graphics::screen_coordinates(ctx);
-        coords.y += 1.0;
-        if coords.y > 50.0 {
-            coords.y = 0.0;
-        }
-        graphics::set_screen_coordinates(ctx, coords)?;*/
         graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
-        self.scroll_pos = self.grid.draw(ctx)?;
+        let mut x;
+        let mut y = self.border_margin as f32;
+        for (i, tile) in self.tiles.iter().enumerate() {
+            x = (self.margin_to_center
+                + self.border_margin
+                + i % self.tiles_per_row * self.tile_width as usize
+                + i % self.tiles_per_row * self.margin) as f32;
+            if i != 0 && i % self.tiles_per_row == 0 {
+                y += (self.margin + self.tile_height as usize) as f32;
+            }
+            if let Some((x_coord, y_coord)) = self.coords_to_select {
+                if x_coord >= x
+                    && x_coord <= x + self.tile_width as f32
+                    && y_coord >= y
+                    && y_coord <= y + self.tile_height as f32
+                {
+                    self.selected_tile = i as isize;
+                    self.coords_to_select = None;
+                }
+            }
+            self.draw_tile(ctx, x, y, tile.image())?;
+            if i == self.selected_tile as usize {
+                let rectangle = graphics::Mesh::new_rectangle(
+                    ctx,
+                    graphics::DrawMode::stroke(self.highlight_border as f32),
+                    graphics::Rect::new(x, y, self.tile_width as f32, self.tile_height as f32),
+                    self.highlight_color,
+                )?;
+                graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
+                let mut screen = graphics::screen_coordinates(ctx);
+                if y + self.tile_height as f32 > screen.y + screen.h {
+                    screen.y += self.tile_height as f32;
+                    graphics::set_screen_coordinates(ctx, screen)?;
+                }
+                if y < screen.y {
+                    screen.y -= self.tile_height as f32;
+                    graphics::set_screen_coordinates(ctx, screen)?;
+                }
+            }
+        }
 
         graphics::present(ctx)?;
         timer::yield_now();
@@ -193,33 +211,34 @@ impl event::EventHandler for MainState {
 
     fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
         let screen = graphics::screen_coordinates(ctx);
-        self.grid.select_tile_under(x, y + screen.y);
+        self.select_tile_under(x, y + screen.y);
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
         if y > 0.0 {
-            self.grid.up();
+            self.up();
         }
         if y < 0.0 {
-            self.grid.down();
+            self.down();
         }
     }
 
     fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
-        println!("{} {}", self.grid.selected_tile, self.grid.tiles_per_row);
+        println!("{} {}", self.selected_tile, self.tiles_per_row);
         match keycode {
             KeyCode::Up => {
-                self.grid.up();
+                self.up();
             }
             KeyCode::Down => {
-                self.grid.down();
+                self.down();
             }
             KeyCode::Left => {
-                self.grid.left();
+                self.left();
             }
             KeyCode::Right => {
-                self.grid.right();
+                self.right();
             }
+            KeyCode::Return => {}
             _ => {}
         }
     }
@@ -230,111 +249,48 @@ impl event::EventHandler for MainState {
         screen.w = width as f32;
         screen.h = height as f32;
         graphics::set_screen_coordinates(ctx, screen).unwrap();
-        self.grid.resize(screen.w);
+        self.resize(screen.w);
     }
 }
 
-struct ImageLoader {
-    must_not_match: Vec<String>,
-    must_match: Vec<String>,
-    max_count: Option<usize>,
-    //images: Receiver<image::ImageBuffer>,
+struct Dispatcher {
+    widget: Box<dyn Widget>,
+    parent: Option<Box<dyn Widget>>,
 }
 
-impl ImageLoader {
-    fn new() -> ImageLoader {
-        ImageLoader {
-            must_not_match: Vec::new(),
-            must_match: Vec::new(),
-            max_count: None,
+impl event::EventHandler for Dispatcher {
+    fn update(&mut self, ctx: &mut Context) -> GameResult {
+        let value = (*self.widget).update(ctx);
+        match (*self.widget).next() {
+            NextAction::None => (),
+            NextAction::Push(widget) => {
+                self.parent = Some(std::mem::replace(&mut self.widget, widget));
+            }
+            NextAction::Pop => {
+                //std::mem::replace(&mut self.parent, ...)
+            }
+            NextAction::Replace(widget) => self.widget = widget,
         }
+        value
+    }
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        (*self.widget).draw(ctx)
     }
 
-    fn filter(&mut self, filter: &str) {
-        self.must_not_match.push(filter.to_owned());
+    fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
+        (*self.widget).mouse_button_up_event(ctx, _button, x, y)
     }
 
-    fn only(&mut self, only: &str) {
-        self.must_match.push(only.to_owned());
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+        (*self.widget).mouse_wheel_event(_ctx, _x, y)
     }
 
-    fn max(&mut self, max: usize) {
-        self.max_count = Some(max);
+    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
+        (*self.widget).key_up_event(_ctx, keycode, _keymod)
     }
 
-    fn load_all(&self, ctx: &mut Context) -> GameResult<Vec<graphics::Image>> {
-        let mut images = Vec::new();
-        let files = filesystem::read_dir(ctx, "/")?;
-        let mut count = 0;
-        let must_not_match: Vec<Regex> = self
-            .must_not_match
-            .iter()
-            .map(|f| Regex::new(f).expect(format!("Regex error for 'filter': {}", f).as_str()))
-            .collect();
-        let must_match: Vec<Regex> = self
-            .must_match
-            .iter()
-            .map(|f| Regex::new(f).expect(format!("Regex error for 'only': {}", f).as_str()))
-            .collect();
-        'fileloop: for file in files {
-            // Is there a way to do this more concisely?
-            if let Some(max) = self.max_count {
-                if count >= max {
-                    break;
-                }
-            }
-            //println!("{:?}", &file);
-            // refactor to resize(ctx, image, max_x, max_y)
-            if file.is_dir() {
-                continue;
-            }
-            let filestr = file
-                .to_str()
-                .expect("Unable to convert image filename to str");
-            for regex in &must_match {
-                if !regex.is_match(&filestr) {
-                    continue 'fileloop;
-                }
-            }
-            for regex in &must_not_match {
-                println!("{}, {:?}", &filestr, regex);
-                if regex.is_match(&filestr) {
-                    continue 'fileloop;
-                }
-            }
-            let image = self.load_and_resize(ctx, &file, 200.0);
-            match image {
-                Ok(i) => {
-                    count += 1;
-                    images.push(i);
-                }
-                Err(err) => eprintln!("{}: {}", file.display(), err),
-            }
-        }
-        Ok(images)
-    }
-
-    fn load_and_resize(
-        &self,
-        ctx: &mut Context,
-        file: &PathBuf,
-        max_width: f32,
-    ) -> GameResult<graphics::Image> {
-        let image = {
-            let mut buf = Vec::new();
-            let mut reader = filesystem::open(ctx, file)?;
-            let _ = reader.read_to_end(&mut buf)?;
-            image::load_from_memory(&buf)?.to_rgba()
-        };
-        let scale: f32 = max_width / image.width() as f32;
-        let image = imageops::resize(
-            &image,
-            (image.width() as f32 * scale) as u32,
-            (image.height() as f32 * scale) as u32,
-            image::imageops::FilterType::Nearest,
-        );
-        let (width, height) = image.dimensions();
-        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
+    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
+        (*self.widget).resize_event(ctx, width, height)
     }
 }
 
@@ -393,8 +349,21 @@ fn main() -> GameResult {
         let max = max.parse().expect("Unable to parse max");
         loader.max(max);
     }
-    let grid = Grid::new(loader.load_all(&mut ctx)?);
-    let state = &mut MainState::new(grid)?;
+    let grid = Grid::new(
+        loader
+            .load_all(&mut ctx)?
+            .into_iter()
+            .map(|i| Box::new(ImageViewer { image: i }) as Box<dyn Tile>)
+            .collect(),
+    );
     graphics::set_resizable(&mut ctx, true)?;
-    event::run(&mut ctx, &mut event_loop, state)
+    event::run(
+        &mut ctx,
+        &mut event_loop,
+        &mut Dispatcher {
+            widget: Box::new(grid),
+            parent: None,
+        },
+    )?;
+    Ok(())
 }
