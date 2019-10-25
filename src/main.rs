@@ -65,9 +65,13 @@ struct Grid {
 impl Grid {
     fn new(tiles: Vec<Box<dyn Tile>>) -> Grid {
         let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
-        // TODO: Fix by precomputing all image sizes.
-        let max_width = (&images).iter().map(|i| i.width()).fold(0, max);
-        let max_height = (&images).iter().map(|i| i.height()).fold(0, max);
+        // Vec<(scale, width, height)>
+        let sizes: Vec<(f32, f32, f32)> = (&images)
+            .iter()
+            .map(|i| Grid::compute_size(i, 200.0, 200.0))
+            .collect();
+        let max_width = (&sizes).iter().map(|size| size.1).fold(0.0, f32::max) as u16;
+        let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
         let tile_width = min(max_width, 200);
         let tile_height = min(max_height, 200);
         Grid {
@@ -133,6 +137,13 @@ impl Grid {
     fn select_tile_under(&mut self, x: f32, y: f32) {
         self.coords_to_select = Some((x, y));
     }
+
+    fn compute_size(image: &graphics::Image, w: f32, h: f32) -> (f32, f32, f32) {
+        let scale = f32::min(w / image.width() as f32, h / image.height() as f32);
+        let width = image.width() as f32 * scale;
+        let height = image.height() as f32 * scale;
+        (scale, width, height)
+    }
 }
 
 impl Widget for Grid {
@@ -159,12 +170,8 @@ impl event::EventHandler for Grid {
         let mut screen = graphics::screen_coordinates(ctx);
         for (i, tile) in self.tiles.iter().enumerate() {
             let image = tile.image();
-            let scale = f32::min(
-                self.tile_width as f32 / image.width() as f32,
-                self.tile_height as f32 / image.height() as f32,
-            );
-            let width = image.width() as f32 * scale;
-            let height = image.height() as f32 * scale;
+            let (scale, width, height) =
+                Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
             x = (self.margin_to_center
                 + self.border_margin
                 + i % self.tiles_per_row * self.tile_width as usize
