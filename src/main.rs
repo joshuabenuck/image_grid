@@ -63,17 +63,17 @@ struct Grid {
 }
 
 impl Grid {
-    fn new(tiles: Vec<Box<dyn Tile>>) -> Grid {
+    fn new(tiles: Vec<Box<dyn Tile>>, tile_width: u16, tile_height: u16) -> Grid {
         let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
         // Vec<(scale, width, height)>
         let sizes: Vec<(f32, f32, f32)> = (&images)
             .iter()
-            .map(|i| Grid::compute_size(i, 200.0, 200.0))
+            .map(|i| Grid::compute_size(i, tile_width as f32, tile_height as f32))
             .collect();
         let max_width = (&sizes).iter().map(|size| size.1).fold(0.0, f32::max) as u16;
         let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
-        let tile_width = min(max_width, 200);
-        let tile_height = min(max_height, 200);
+        let tile_width = min(max_width, tile_width);
+        let tile_height = min(max_height, tile_height);
         Grid {
             tiles: tiles,
             margin: 5,
@@ -380,6 +380,20 @@ fn main() -> GameResult {
                 .takes_value(true)
                 .help("Only display files that match this regex."),
         )
+        .arg(
+            Arg::with_name("tile-width")
+                .long("tile-width")
+                .takes_value(true)
+                .default_value("200")
+                .help("Set the max tile-width."),
+        )
+        .arg(
+            Arg::with_name("tile-height")
+                .long("tile-width")
+                .takes_value(true)
+                .default_value("200")
+                .help("Set the max tile-width."),
+        )
         .get_matches();
     let cb = ggez::ContextBuilder::new("Image Grid", "Joshua Benuck")
         .add_resource_path(matches.value_of("dir").expect("Must specify a directory!"));
@@ -405,6 +419,16 @@ fn main() -> GameResult {
             .into_iter()
             .map(|i| Box::new(ImageViewer { image: i }) as Box<dyn Tile>)
             .collect(),
+        matches
+            .value_of("tile-width")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap(),
+        matches
+            .value_of("tile-height")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap(),
     );
     graphics::set_resizable(&mut ctx, true)?;
     event::run(
