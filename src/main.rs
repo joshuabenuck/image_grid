@@ -59,12 +59,13 @@ struct Grid {
     tiles_per_row: usize,
     margin_to_center: usize,
     coords_to_select: Option<(f32, f32)>,
-    image_to_view: Option<usize>,
+    draw_tile: bool,
 }
 
 impl Grid {
     fn new(tiles: Vec<Box<dyn Tile>>) -> Grid {
         let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
+        // TODO: Fix by precomputing all image sizes.
         let max_width = (&images).iter().map(|i| i.width()).fold(0, max);
         let max_height = (&images).iter().map(|i| i.height()).fold(0, max);
         let tile_width = min(max_width, 200);
@@ -81,18 +82,13 @@ impl Grid {
             tiles_per_row: 0,
             margin_to_center: 0,
             coords_to_select: None,
-            image_to_view: None,
+            draw_tile: false,
         }
     }
 
     fn margin<'a>(&'a mut self, m: usize) -> &'a mut Self {
         self.margin = m;
         self
-    }
-
-    fn draw_tile(&self, ctx: &mut Context, x: f32, y: f32, image: &graphics::Image) -> GameResult {
-        let dest_point = mint::Point2 { x, y };
-        graphics::draw(ctx, image, graphics::DrawParam::default().dest(dest_point))
     }
 
     fn resize(&mut self, new_width: f32) {
@@ -141,11 +137,6 @@ impl Grid {
 
 impl Widget for Grid {
     fn next(&self) -> NextAction {
-        if let Some(index) = self.image_to_view {
-            return NextAction::Push(Box::new(ImageViewer {
-                image: self.tiles[index].image().clone(),
-            }));
-        }
         return NextAction::None;
     }
 }
@@ -165,7 +156,15 @@ impl event::EventHandler for Grid {
         graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
         let mut x;
         let mut y = self.border_margin as f32;
+        let mut screen = graphics::screen_coordinates(ctx);
         for (i, tile) in self.tiles.iter().enumerate() {
+            let image = tile.image();
+            let scale = f32::min(
+                self.tile_width as f32 / image.width() as f32,
+                self.tile_height as f32 / image.height() as f32,
+            );
+            let width = image.width() as f32 * scale;
+            let height = image.height() as f32 * scale;
             x = (self.margin_to_center
                 + self.border_margin
                 + i % self.tiles_per_row * self.tile_width as usize
@@ -183,24 +182,65 @@ impl event::EventHandler for Grid {
                     self.coords_to_select = None;
                 }
             }
-            self.draw_tile(ctx, x, y, tile.image())?;
+            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
+            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
+            let dest_point = mint::Point2 {
+                x: x + x_image_margin,
+                y: y + y_image_margin,
+            };
+            graphics::draw(
+                ctx,
+                image,
+                graphics::DrawParam::default()
+                    .dest(dest_point)
+                    .scale([scale, scale]),
+            )?;
             if i == self.selected_tile as usize {
                 let rectangle = graphics::Mesh::new_rectangle(
                     ctx,
                     graphics::DrawMode::stroke(self.highlight_border as f32),
-                    graphics::Rect::new(x, y, self.tile_width as f32, self.tile_height as f32),
+                    graphics::Rect::new(x + x_image_margin, y + y_image_margin, width, height),
                     self.highlight_color,
                 )?;
                 graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
-                let mut screen = graphics::screen_coordinates(ctx);
                 if y + self.tile_height as f32 > screen.y + screen.h {
-                    screen.y += self.tile_height as f32;
+                    screen.y += height;
                     graphics::set_screen_coordinates(ctx, screen)?;
                 }
                 if y < screen.y {
-                    screen.y -= self.tile_height as f32;
+                    screen.y -= height;
                     graphics::set_screen_coordinates(ctx, screen)?;
                 }
+            }
+            if self.draw_tile {
+                // draw overlay
+                let rectangle = graphics::Mesh::new_rectangle(
+                    ctx,
+                    graphics::DrawMode::fill(),
+                    graphics::Rect::new(0.0, screen.y, screen.w, screen.h),
+                    graphics::Color::from([1.0, 1.0, 1.0, 1.0]),
+                )?;
+                graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
+
+                // draw currently selected image
+                // TODO: Move into Tile trait
+                let image = self.tiles[self.selected_tile as usize].image();
+                let scale = f32::min(
+                    screen.w / image.width() as f32,
+                    screen.h / image.height() as f32,
+                );
+                let width = image.width() as f32 * scale;
+                let height = image.height() as f32 * scale;
+                let x = (screen.w - width) / 2.0;
+                let y = (screen.h - height) / 2.0 + screen.y;
+                let dest_point = mint::Point2 { x, y };
+                graphics::draw(
+                    ctx,
+                    image,
+                    graphics::DrawParam::default()
+                        .dest(dest_point)
+                        .scale([scale, scale]),
+                )?;
             }
         }
 
@@ -238,7 +278,10 @@ impl event::EventHandler for Grid {
             KeyCode::Right => {
                 self.right();
             }
-            KeyCode::Return => {}
+            KeyCode::Return => {
+                self.draw_tile = !self.draw_tile;
+            }
+            KeyCode::Escape => {}
             _ => {}
         }
     }

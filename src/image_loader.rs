@@ -72,7 +72,7 @@ impl ImageLoader {
                     continue 'fileloop;
                 }
             }
-            let image = self.load_and_resize(ctx, &file, 200.0);
+            let image = self.load(ctx, &file);
             match image {
                 Ok(i) => {
                     count += 1;
@@ -84,18 +84,26 @@ impl ImageLoader {
         Ok(images)
     }
 
+    fn load_file(&self, ctx: &mut Context, file: &PathBuf) -> GameResult<image::RgbaImage> {
+        let mut buf = Vec::new();
+        let mut reader = filesystem::open(ctx, file)?;
+        let _ = reader.read_to_end(&mut buf)?;
+        Ok(image::load_from_memory(&buf)?.to_rgba())
+    }
+
+    fn load(&self, ctx: &mut Context, file: &PathBuf) -> GameResult<graphics::Image> {
+        let image = self.load_file(ctx, file)?;
+        let (width, height) = image.dimensions();
+        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
+    }
+
     fn load_and_resize(
         &self,
         ctx: &mut Context,
         file: &PathBuf,
         max_width: f32,
     ) -> GameResult<graphics::Image> {
-        let image = {
-            let mut buf = Vec::new();
-            let mut reader = filesystem::open(ctx, file)?;
-            let _ = reader.read_to_end(&mut buf)?;
-            image::load_from_memory(&buf)?.to_rgba()
-        };
+        let image = self.load_file(ctx, file)?;
         let scale: f32 = max_width / image.width() as f32;
         let image = imageops::resize(
             &image,
