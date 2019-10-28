@@ -44,6 +44,16 @@ impl event::EventHandler for Dispatcher {
         (*self.widget).mouse_wheel_event(_ctx, _x, y)
     }
 
+    fn key_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        keycode: KeyCode,
+        _keymod: KeyMods,
+        _repeat: bool,
+    ) {
+        (*self.widget).key_down_event(_ctx, keycode, _keymod, _repeat)
+    }
+
     fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
         (*self.widget).key_up_event(_ctx, keycode, _keymod)
     }

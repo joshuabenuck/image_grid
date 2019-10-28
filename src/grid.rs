@@ -1,10 +1,20 @@
 use crate::dispatcher::{NextAction, Widget};
+use failure::Error;
 use ggez::event::{self, KeyCode, KeyMods, MouseButton};
 use ggez::{self, graphics, timer, Context, GameResult};
 use std::cmp::{max, min};
+use std::process::Child;
+
+pub enum TileAction {
+    None,
+    Launch(Result<Child, Error>),
+}
 
 pub trait Tile {
     fn image(&self) -> &graphics::Image;
+    fn act(&self) -> TileAction {
+        TileAction::None
+    }
 }
 
 // margin: the total space between items the grid
@@ -129,6 +139,7 @@ impl event::EventHandler for Grid {
         let mut x;
         let mut y = self.border_margin as f32;
         let mut screen = graphics::screen_coordinates(ctx);
+        // TODO: Only iterate over the tiles on screen
         for (i, tile) in self.tiles.iter().enumerate() {
             let image = tile.image();
             let (scale, width, height) =
@@ -223,11 +234,32 @@ impl event::EventHandler for Grid {
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+        // TODO: Change to move one by one when displaying a single tile
         if y > 0.0 {
             self.up();
         }
         if y < 0.0 {
             self.down();
+        }
+    }
+
+    fn key_down_event(
+        &mut self,
+        ctx: &mut Context,
+        keycode: KeyCode,
+        _keymod: KeyMods,
+        _repeat: bool,
+    ) {
+        match keycode {
+            // TODO: Allow selected widgets to override behavior here
+            KeyCode::Escape => {
+                if self.draw_tile {
+                    self.draw_tile = false;
+                } else {
+                    ggez::event::quit(ctx);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -247,9 +279,13 @@ impl event::EventHandler for Grid {
                 self.right();
             }
             KeyCode::Return => {
-                self.draw_tile = !self.draw_tile;
+                if !self.draw_tile {
+                    self.draw_tile = true;
+                } else {
+                    self.tiles[self.selected_tile as usize].act();
+                }
             }
-            KeyCode::Escape => {}
+            // TODO: Add page up, page down, home, and end support
             _ => {}
         }
     }
