@@ -1,53 +1,14 @@
-mod image_loader;
-use clap::{App, Arg};
+use crate::dispatcher::{NextAction, Widget};
 use ggez::event::{self, KeyCode, KeyMods, MouseButton};
 use ggez::{self, graphics, timer, Context, GameResult};
-use image_loader::ImageLoader;
-use mint;
 use std::cmp::{max, min};
 
-enum NextAction {
-    None,
-    Push(Box<dyn Widget>),
-    Pop,
-    Replace(Box<dyn Widget>),
-}
-
-trait Widget: event::EventHandler {
-    fn next(&self) -> NextAction;
-}
-
-trait Tile {
+pub trait Tile {
     fn image(&self) -> &graphics::Image;
 }
 
-struct ImageViewer {
-    image: graphics::Image,
-}
-
-impl Tile for ImageViewer {
-    fn image(&self) -> &graphics::Image {
-        &self.image
-    }
-}
-
-impl Widget for ImageViewer {
-    fn next(&self) -> NextAction {
-        NextAction::None
-    }
-}
-
-impl event::EventHandler for ImageViewer {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult {
-        Ok(())
-    }
-    fn draw(&mut self, _ctx: &mut Context) -> GameResult {
-        Ok(())
-    }
-}
-
 // margin: the total space between items the grid
-struct Grid {
+pub struct Grid {
     tiles: Vec<Box<dyn Tile>>,
     margin: usize,
     tile_width: u16,
@@ -63,7 +24,7 @@ struct Grid {
 }
 
 impl Grid {
-    fn new(tiles: Vec<Box<dyn Tile>>, tile_width: u16, tile_height: u16) -> Grid {
+    pub fn new(tiles: Vec<Box<dyn Tile>>, tile_width: u16, tile_height: u16) -> Grid {
         let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
         // Vec<(scale, width, height)>
         let sizes: Vec<(f32, f32, f32)> = (&images)
@@ -301,143 +262,4 @@ impl event::EventHandler for Grid {
         graphics::set_screen_coordinates(ctx, screen).unwrap();
         self.resize(screen.w);
     }
-}
-
-struct Dispatcher {
-    widget: Box<dyn Widget>,
-    parent: Option<Box<dyn Widget>>,
-}
-
-impl event::EventHandler for Dispatcher {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
-        let value = (*self.widget).update(ctx);
-        match (*self.widget).next() {
-            NextAction::None => (),
-            NextAction::Push(widget) => {
-                self.parent = Some(std::mem::replace(&mut self.widget, widget));
-            }
-            NextAction::Pop => {
-                //std::mem::replace(&mut self.parent, ...)
-            }
-            NextAction::Replace(widget) => self.widget = widget,
-        }
-        value
-    }
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        (*self.widget).draw(ctx)
-    }
-
-    fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
-        (*self.widget).mouse_button_up_event(ctx, _button, x, y)
-    }
-
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
-        (*self.widget).mouse_wheel_event(_ctx, _x, y)
-    }
-
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
-        (*self.widget).key_up_event(_ctx, keycode, _keymod)
-    }
-
-    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
-        (*self.widget).resize_event(ctx, width, height)
-    }
-}
-
-fn main() -> GameResult {
-    let matches = App::new("image_grid")
-        .about("Utility to display images in a directory in a grid.")
-        .arg(
-            Arg::with_name("dir")
-                .long("dir")
-                .short("d")
-                .takes_value(true)
-                .required(true)
-                .help("The directory to display."),
-        )
-        .arg(
-            Arg::with_name("max")
-                .long("max")
-                .short("m")
-                .takes_value(true)
-                .required(true)
-                .default_value("100")
-                .help("The maximum number of images to display."),
-        )
-        .arg(
-            Arg::with_name("filter")
-                .long("filter")
-                .short("f")
-                .multiple(true)
-                .takes_value(true)
-                .help("Filter out files that match the regex."),
-        )
-        .arg(
-            Arg::with_name("only")
-                .long("only")
-                .short("o")
-                .multiple(true)
-                .takes_value(true)
-                .help("Only display files that match this regex."),
-        )
-        .arg(
-            Arg::with_name("tile-width")
-                .long("tile-width")
-                .takes_value(true)
-                .default_value("200")
-                .help("Set the max tile-width."),
-        )
-        .arg(
-            Arg::with_name("tile-height")
-                .long("tile-width")
-                .takes_value(true)
-                .default_value("200")
-                .help("Set the max tile-width."),
-        )
-        .get_matches();
-    let cb = ggez::ContextBuilder::new("Image Grid", "Joshua Benuck")
-        .add_resource_path(matches.value_of("dir").expect("Must specify a directory!"));
-    let (mut ctx, mut event_loop) = cb.build()?;
-    let mut loader = ImageLoader::new();
-    if let Some(filters) = matches.values_of("filter") {
-        for filter in filters {
-            loader.filter(filter);
-        }
-    }
-    if let Some(onlys) = matches.values_of("only") {
-        for only in onlys {
-            loader.only(only);
-        }
-    }
-    if let Some(max) = matches.value_of("max") {
-        let max = max.parse().expect("Unable to parse max");
-        loader.max(max);
-    }
-    let grid = Grid::new(
-        loader
-            .load_all(&mut ctx)?
-            .into_iter()
-            .map(|i| Box::new(ImageViewer { image: i }) as Box<dyn Tile>)
-            .collect(),
-        matches
-            .value_of("tile-width")
-            .unwrap()
-            .parse::<u16>()
-            .unwrap(),
-        matches
-            .value_of("tile-height")
-            .unwrap()
-            .parse::<u16>()
-            .unwrap(),
-    );
-    graphics::set_resizable(&mut ctx, true)?;
-    event::run(
-        &mut ctx,
-        &mut event_loop,
-        &mut Dispatcher {
-            widget: Box::new(grid),
-            parent: None,
-        },
-    )?;
-    Ok(())
 }
