@@ -4,6 +4,8 @@ use ggez::event::{self, KeyCode, KeyMods, MouseButton};
 use ggez::{self, graphics, timer, Context, GameResult};
 use std::cmp::{max, min};
 use std::process::Child;
+use std::thread;
+use std::time;
 
 pub enum TileAction {
     None,
@@ -31,6 +33,7 @@ pub struct Grid {
     margin_to_center: usize,
     coords_to_select: Option<(f32, f32)>,
     draw_tile: bool,
+    dirty: bool,
 }
 
 impl Grid {
@@ -58,6 +61,7 @@ impl Grid {
             margin_to_center: 0,
             coords_to_select: None,
             draw_tile: false,
+            dirty: true,
         }
     }
 
@@ -67,6 +71,7 @@ impl Grid {
     }
 
     fn resize(&mut self, new_width: f32) {
+        self.dirty = true;
         let remaining_width = new_width as usize - self.border_margin * 2 + self.margin;
         let tile_margin_width = self.tile_width as usize + self.margin;
         // TODO: tiles per row and margin to center do not handle case where
@@ -129,17 +134,26 @@ impl event::EventHandler for Grid {
         while timer::check_update_time(ctx, DESIRED_FPS) {
             //println!("Delta frame time: {:?} ", timer::delta(ctx));
             //println!("Average FPS: {}", timer::fps(ctx));
-            //thread::sleep(time::Duration::from_millis(50));
+            thread::sleep(time::Duration::from_millis(10));
         }
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        if !self.dirty {
+            return Ok(());
+        }
         graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
         let mut x;
         let mut y = self.border_margin as f32;
         let mut screen = graphics::screen_coordinates(ctx);
-        // TODO: Only iterate over the tiles on screen
+        let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
+            * self.tiles_per_row;
+        let row_of_selection: usize = self.selected_tile as usize / self.tiles_per_row;
+        if start_at > row_of_selection {
+            start_at = row_of_selection;
+        }
+        let mut move_win_by = 0.0;
         for (i, tile) in self.tiles.iter().enumerate() {
             let image = tile.image();
             let (scale, width, height) =
@@ -150,6 +164,9 @@ impl event::EventHandler for Grid {
                 + i % self.tiles_per_row * self.margin) as f32;
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
+                if i > self.selected_tile as usize && y > (screen.y + screen.h) {
+                    break;
+                }
             }
             if let Some((x_coord, y_coord)) = self.coords_to_select {
                 if x_coord >= x
@@ -160,6 +177,9 @@ impl event::EventHandler for Grid {
                     self.selected_tile = i as isize;
                     self.coords_to_select = None;
                 }
+            }
+            if i < start_at {
+                continue;
             }
             let x_image_margin = (self.tile_width as f32 - width) / 2.0;
             let y_image_margin = (self.tile_height as f32 - height) / 2.0;
@@ -183,12 +203,10 @@ impl event::EventHandler for Grid {
                 )?;
                 graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
                 if y + self.tile_height as f32 > screen.y + screen.h {
-                    screen.y += height;
-                    graphics::set_screen_coordinates(ctx, screen)?;
+                    move_win_by = height;
                 }
                 if y < screen.y {
-                    screen.y -= height;
-                    graphics::set_screen_coordinates(ctx, screen)?;
+                    move_win_by = -height;
                 }
             }
             if self.draw_tile {
@@ -222,6 +240,12 @@ impl event::EventHandler for Grid {
                 )?;
             }
         }
+        self.dirty = false;
+        if move_win_by != 0.0 {
+            screen.y += move_win_by;
+            graphics::set_screen_coordinates(ctx, screen)?;
+            self.dirty = true;
+        }
 
         graphics::present(ctx)?;
         timer::yield_now();
@@ -234,11 +258,18 @@ impl event::EventHandler for Grid {
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
-        // TODO: Change to move one by one when displaying a single tile
         if y > 0.0 {
+            if self.draw_tile {
+                self.left();
+                return;
+            }
             self.up();
         }
         if y < 0.0 {
+            if self.draw_tile {
+                self.right();
+                return;
+            }
             self.down();
         }
     }
@@ -251,10 +282,10 @@ impl event::EventHandler for Grid {
         _repeat: bool,
     ) {
         match keycode {
-            // TODO: Allow selected widgets to override behavior here
             KeyCode::Escape => {
                 if self.draw_tile {
                     self.draw_tile = false;
+                    self.dirty = true;
                 } else {
                     ggez::event::quit(ctx);
                 }
@@ -285,9 +316,18 @@ impl event::EventHandler for Grid {
                     self.tiles[self.selected_tile as usize].act();
                 }
             }
-            // TODO: Add page up, page down, home, and end support
-            _ => {}
+            KeyCode::Home => {
+                self.selected_tile = 0;
+            }
+            KeyCode::End => {
+                self.selected_tile = (self.tiles.len() - 1) as isize;
+            }
+            // TODO: Add page up, page down support
+            _ => {
+                return ();
+            }
         }
+        self.dirty = true;
     }
 
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
