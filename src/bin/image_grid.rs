@@ -5,8 +5,7 @@ use dispatcher::{Dispatcher, NextAction, Widget};
 use ggez::event;
 use ggez::{self, graphics, Context, GameResult};
 use grid::{Grid, Tile};
-use image_grid::{dispatcher, grid, image_loader};
-use image_loader::ImageLoader;
+use image_grid::{dispatcher, grid, image_loader::ImageLoader};
 
 struct ImageViewer {
     image: graphics::Image,

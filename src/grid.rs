@@ -282,21 +282,6 @@ impl event::EventHandler for Grid {
         _repeat: bool,
     ) {
         match keycode {
-            KeyCode::Escape => {
-                if self.draw_tile {
-                    self.draw_tile = false;
-                    self.dirty = true;
-                } else {
-                    ggez::event::quit(ctx);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
-        println!("{} {}", self.selected_tile, self.tiles_per_row);
-        match keycode {
             KeyCode::Up => {
                 self.up();
             }
@@ -322,12 +307,27 @@ impl event::EventHandler for Grid {
             KeyCode::End => {
                 self.selected_tile = (self.tiles.len() - 1) as isize;
             }
-            // TODO: Add page up, page down support
+            KeyCode::Escape => {
+                if self.draw_tile {
+                    self.draw_tile = false;
+                    self.dirty = true;
+                } else {
+                    ggez::event::quit(ctx);
+                }
+            }
             _ => {
                 return ();
             }
         }
         self.dirty = true;
+    }
+
+    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
+        match keycode {
+            _ => {
+                return ();
+            }
+        }
     }
 
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
