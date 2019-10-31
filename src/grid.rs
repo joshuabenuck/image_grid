@@ -12,22 +12,32 @@ pub enum TileAction {
     Launch(Result<Child, Error>),
 }
 
-pub trait Tile {
-    fn image(&self) -> &graphics::Image;
-    fn act(&self) -> TileAction {
+pub trait TileHandler {
+    fn tiles(&self) -> &Vec<graphics::Image>;
+    fn act(&self, _i: usize) -> TileAction {
         TileAction::None
+    }
+    fn highlight_color(&self, _i: usize) -> graphics::Color {
+        graphics::WHITE
+    }
+    fn key_down(
+        &mut self,
+        _i: usize,
+        keycode: KeyCode,
+        keymod: KeyMods,
+    ) -> Option<(KeyCode, KeyMods)> {
+        return Some((keycode, keymod));
     }
 }
 
 // margin: the total space between items the grid
-pub struct Grid {
-    tiles: Vec<Box<dyn Tile>>,
+pub struct Grid<'a> {
+    pub tile_handler: Box<&'a mut dyn TileHandler>,
     margin: usize,
     tile_width: u16,
     tile_height: u16,
     border_margin: usize,
     selected_tile: isize,
-    highlight_color: graphics::Color,
     highlight_border: usize,
     tiles_per_row: usize,
     margin_to_center: usize,
@@ -36,9 +46,13 @@ pub struct Grid {
     dirty: bool,
 }
 
-impl Grid {
-    pub fn new(tiles: Vec<Box<dyn Tile>>, tile_width: u16, tile_height: u16) -> Grid {
-        let images: Vec<&graphics::Image> = tiles.iter().map(|t| t.image()).collect();
+impl<'a> Grid<'a> {
+    pub fn new(
+        tile_handler: Box<&'a mut dyn TileHandler>,
+        tile_width: u16,
+        tile_height: u16,
+    ) -> Grid {
+        let images: &Vec<graphics::Image> = tile_handler.tiles();
         // Vec<(scale, width, height)>
         let sizes: Vec<(f32, f32, f32)> = (&images)
             .iter()
@@ -49,13 +63,12 @@ impl Grid {
         let tile_width = min(max_width, tile_width);
         let tile_height = min(max_height, tile_height);
         Grid {
-            tiles: tiles,
+            tile_handler,
             margin: 5,
             tile_width,
             tile_height,
             border_margin: 20,
             selected_tile: 0,
-            highlight_color: graphics::WHITE,
             highlight_border: 2,
             tiles_per_row: 0,
             margin_to_center: 0,
@@ -63,11 +76,6 @@ impl Grid {
             draw_tile: false,
             dirty: true,
         }
-    }
-
-    fn margin<'a>(&'a mut self, m: usize) -> &'a mut Self {
-        self.margin = m;
-        self
     }
 
     fn resize(&mut self, new_width: f32) {
@@ -97,7 +105,7 @@ impl Grid {
 
     fn down(&mut self) {
         self.selected_tile = min(
-            (self.tiles.len() - 1) as isize,
+            (self.tile_handler.tiles().len() - 1) as isize,
             self.selected_tile + self.tiles_per_row as isize,
         );
     }
@@ -107,7 +115,10 @@ impl Grid {
     }
 
     fn right(&mut self) {
-        self.selected_tile = min((self.tiles.len() - 1) as isize, self.selected_tile + 1);
+        self.selected_tile = min(
+            (self.tile_handler.tiles().len() - 1) as isize,
+            self.selected_tile + 1,
+        );
     }
 
     fn select_tile_under(&mut self, x: f32, y: f32) {
@@ -122,13 +133,13 @@ impl Grid {
     }
 }
 
-impl Widget for Grid {
+impl Widget for Grid<'_> {
     fn next(&self) -> NextAction {
         return NextAction::None;
     }
 }
 
-impl event::EventHandler for Grid {
+impl event::EventHandler for Grid<'_> {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         const DESIRED_FPS: u32 = 20;
         while timer::check_update_time(ctx, DESIRED_FPS) {
@@ -154,8 +165,8 @@ impl event::EventHandler for Grid {
             start_at = row_of_selection;
         }
         let mut move_win_by = 0.0;
-        for (i, tile) in self.tiles.iter().enumerate() {
-            let image = tile.image();
+        let tiles = self.tile_handler.tiles();
+        for (i, image) in tiles.iter().enumerate() {
             let (scale, width, height) =
                 Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
             x = (self.margin_to_center
@@ -199,7 +210,7 @@ impl event::EventHandler for Grid {
                     ctx,
                     graphics::DrawMode::stroke(self.highlight_border as f32),
                     graphics::Rect::new(x + x_image_margin, y + y_image_margin, width, height),
-                    self.highlight_color,
+                    self.tile_handler.highlight_color(i),
                 )?;
                 graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
                 if y + self.tile_height as f32 > screen.y + screen.h {
@@ -209,36 +220,36 @@ impl event::EventHandler for Grid {
                     move_win_by = -height;
                 }
             }
-            if self.draw_tile {
-                // draw overlay
-                let rectangle = graphics::Mesh::new_rectangle(
-                    ctx,
-                    graphics::DrawMode::fill(),
-                    graphics::Rect::new(0.0, screen.y, screen.w, screen.h),
-                    graphics::Color::from([1.0, 1.0, 1.0, 1.0]),
-                )?;
-                graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
+        }
+        if self.draw_tile {
+            // draw overlay
+            let rectangle = graphics::Mesh::new_rectangle(
+                ctx,
+                graphics::DrawMode::fill(),
+                graphics::Rect::new(0.0, screen.y, screen.w, screen.h),
+                graphics::Color::from([1.0, 1.0, 1.0, 1.0]),
+            )?;
+            graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
 
-                // draw currently selected image
-                // TODO: Move into Tile trait
-                let image = self.tiles[self.selected_tile as usize].image();
-                let scale = f32::min(
-                    screen.w / image.width() as f32,
-                    screen.h / image.height() as f32,
-                );
-                let width = image.width() as f32 * scale;
-                let height = image.height() as f32 * scale;
-                let x = (screen.w - width) / 2.0;
-                let y = (screen.h - height) / 2.0 + screen.y;
-                let dest_point = mint::Point2 { x, y };
-                graphics::draw(
-                    ctx,
-                    image,
-                    graphics::DrawParam::default()
-                        .dest(dest_point)
-                        .scale([scale, scale]),
-                )?;
-            }
+            // draw currently selected image
+            // TODO: Move into Tile trait
+            let image = &self.tile_handler.tiles()[self.selected_tile as usize];
+            let scale = f32::min(
+                screen.w / image.width() as f32,
+                screen.h / image.height() as f32,
+            );
+            let width = image.width() as f32 * scale;
+            let height = image.height() as f32 * scale;
+            let x = (screen.w - width) / 2.0;
+            let y = (screen.h - height) / 2.0 + screen.y;
+            let dest_point = mint::Point2 { x, y };
+            graphics::draw(
+                ctx,
+                image,
+                graphics::DrawParam::default()
+                    .dest(dest_point)
+                    .scale([scale, scale]),
+            )?;
         }
         self.dirty = false;
         if move_win_by != 0.0 {
@@ -278,10 +289,19 @@ impl event::EventHandler for Grid {
         &mut self,
         ctx: &mut Context,
         keycode: KeyCode,
-        _keymod: KeyMods,
+        keymod: KeyMods,
         _repeat: bool,
     ) {
+        let result = self
+            .tile_handler
+            .key_down(self.selected_tile as usize, keycode, keymod);
+        if let None = result {
+            self.dirty = true;
+            return;
+        }
+        let (keycode, keymod) = result.unwrap();
         match keycode {
+            KeyCode::E => if keymod.contains(KeyMods::CTRL) {},
             KeyCode::Up => {
                 self.up();
             }
@@ -298,14 +318,14 @@ impl event::EventHandler for Grid {
                 if !self.draw_tile {
                     self.draw_tile = true;
                 } else {
-                    self.tiles[self.selected_tile as usize].act();
+                    self.tile_handler.act(self.selected_tile as usize);
                 }
             }
             KeyCode::Home => {
                 self.selected_tile = 0;
             }
             KeyCode::End => {
-                self.selected_tile = (self.tiles.len() - 1) as isize;
+                self.selected_tile = (self.tile_handler.tiles().len() - 1) as isize;
             }
             KeyCode::Escape => {
                 if self.draw_tile {

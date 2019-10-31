@@ -1,34 +1,21 @@
 extern crate image_grid;
 
 use clap::{App, Arg};
-use dispatcher::{Dispatcher, NextAction, Widget};
+use dispatcher::Dispatcher;
 use ggez::event;
-use ggez::{self, graphics, Context, GameResult};
-use grid::{Grid, Tile};
+use ggez::{self, graphics, GameResult};
+use grid::{Grid, TileHandler};
 use image_grid::{dispatcher, grid, image_loader::ImageLoader};
 
-struct ImageViewer {
-    image: graphics::Image,
+trait Game {}
+
+struct ImageTileHandler {
+    tiles: Vec<graphics::Image>,
 }
 
-impl Tile for ImageViewer {
-    fn image(&self) -> &graphics::Image {
-        &self.image
-    }
-}
-
-impl Widget for ImageViewer {
-    fn next(&self) -> NextAction {
-        NextAction::None
-    }
-}
-
-impl event::EventHandler for ImageViewer {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult {
-        Ok(())
-    }
-    fn draw(&mut self, _ctx: &mut Context) -> GameResult {
-        Ok(())
+impl TileHandler for ImageTileHandler {
+    fn tiles(&self) -> &Vec<graphics::Image> {
+        return &self.tiles;
     }
 }
 
@@ -101,12 +88,12 @@ fn main() -> GameResult {
         let max = max.parse().expect("Unable to parse max");
         loader.max(max);
     }
-    let grid = Grid::new(
-        loader
-            .load_all(&mut ctx)?
-            .into_iter()
-            .map(|i| Box::new(ImageViewer { image: i }) as Box<dyn Tile>)
-            .collect(),
+    let mut handler = ImageTileHandler {
+        tiles: loader.load_all(&mut ctx)?,
+    };
+
+    let mut grid = Grid::new(
+        Box::new(&mut handler),
         matches
             .value_of("tile-width")
             .unwrap()
@@ -119,13 +106,6 @@ fn main() -> GameResult {
             .unwrap(),
     );
     graphics::set_resizable(&mut ctx, true)?;
-    event::run(
-        &mut ctx,
-        &mut event_loop,
-        &mut Dispatcher {
-            widget: Box::new(grid),
-            parent: None,
-        },
-    )?;
+    event::run(&mut ctx, &mut event_loop, &mut grid)?;
     Ok(())
 }
