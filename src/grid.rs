@@ -14,13 +14,21 @@ pub enum TileAction {
 
 pub trait TileHandler {
     fn tiles(&self) -> &Vec<usize>;
+
     fn tile(&self, i: usize) -> &graphics::Image;
+
     fn act(&self, _i: usize) -> TileAction {
         TileAction::None
     }
+
     fn highlight_color(&self, _i: usize) -> graphics::Color {
         graphics::WHITE
     }
+
+    fn background_color(&self) -> graphics::Color {
+        [0.1, 0.2, 0.3, 1.0].into()
+    }
+
     fn key_down(
         &mut self,
         _i: usize,
@@ -154,7 +162,7 @@ impl event::EventHandler for Grid<'_> {
         if !self.dirty {
             return Ok(());
         }
-        graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
+        graphics::clear(ctx, self.tile_handler.background_color());
         let mut x;
         let mut y = self.border_margin as f32;
         let mut screen = graphics::screen_coordinates(ctx);
