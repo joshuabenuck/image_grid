@@ -46,7 +46,7 @@ pub struct Grid<'a> {
     tile_width: u16,
     tile_height: u16,
     border_margin: usize,
-    selected_tile: isize,
+    selected_tile: usize,
     highlight_border: usize,
     tiles_per_row: usize,
     margin_to_center: usize,
@@ -108,25 +108,25 @@ impl<'a> Grid<'a> {
     fn scroll_by() {}
 
     fn up(&mut self) {
-        self.selected_tile = max(0 as isize, self.selected_tile - self.tiles_per_row as isize);
+        self.selected_tile = max(
+            0 as isize,
+            self.selected_tile as isize - self.tiles_per_row as isize,
+        ) as usize;
     }
 
     fn down(&mut self) {
         self.selected_tile = min(
-            (self.tile_handler.tiles().len() - 1) as isize,
-            self.selected_tile + self.tiles_per_row as isize,
+            self.tile_handler.tiles().len() - 1,
+            self.selected_tile + self.tiles_per_row,
         );
     }
 
     fn left(&mut self) {
-        self.selected_tile = max(0 as isize, self.selected_tile - 1);
+        self.selected_tile = max(0 as isize, self.selected_tile as isize - 1) as usize;
     }
 
     fn right(&mut self) {
-        self.selected_tile = min(
-            (self.tile_handler.tiles().len() - 1) as isize,
-            self.selected_tile + 1,
-        );
+        self.selected_tile = min(self.tile_handler.tiles().len() - 1, self.selected_tile + 1);
     }
 
     fn select_tile_under(&mut self, x: f32, y: f32) {
@@ -168,12 +168,16 @@ impl event::EventHandler for Grid<'_> {
         let mut screen = graphics::screen_coordinates(ctx);
         let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
             * self.tiles_per_row;
-        let row_of_selection: usize = self.selected_tile as usize / self.tiles_per_row;
+        let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
         if start_at > row_of_selection {
             start_at = row_of_selection;
         }
         let mut move_win_by = 0.0;
-        for (i, ii) in self.tile_handler.tiles().iter().enumerate() {
+        let tiles = self.tile_handler.tiles();
+        if self.selected_tile >= tiles.len() {
+            self.selected_tile = tiles.len() - 1;
+        }
+        for (i, ii) in tiles.iter().enumerate() {
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
                 Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
@@ -183,7 +187,7 @@ impl event::EventHandler for Grid<'_> {
                 + i % self.tiles_per_row * self.margin) as f32;
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
-                if i > self.selected_tile as usize && y > (screen.y + screen.h) {
+                if i > self.selected_tile && y > (screen.y + screen.h) {
                     break;
                 }
             }
@@ -193,7 +197,7 @@ impl event::EventHandler for Grid<'_> {
                     && y_coord >= y
                     && y_coord <= y + self.tile_height as f32
                 {
-                    self.selected_tile = i as isize;
+                    self.selected_tile = i;
                     self.coords_to_select = None;
                 }
             }
@@ -213,7 +217,7 @@ impl event::EventHandler for Grid<'_> {
                     .dest(dest_point)
                     .scale([scale, scale]),
             )?;
-            if i == self.selected_tile as usize {
+            if i == self.selected_tile {
                 let rectangle = graphics::Mesh::new_rectangle(
                     ctx,
                     graphics::DrawMode::stroke(self.highlight_border as f32),
@@ -243,7 +247,7 @@ impl event::EventHandler for Grid<'_> {
             // TODO: Move into Tile trait
             let image = &self
                 .tile_handler
-                .tile(self.tile_handler.tiles()[self.selected_tile as usize]);
+                .tile(self.tile_handler.tiles()[self.selected_tile]);
             let scale = f32::min(
                 screen.w / image.width() as f32,
                 screen.h / image.height() as f32,
@@ -304,7 +308,7 @@ impl event::EventHandler for Grid<'_> {
     ) {
         let result = self
             .tile_handler
-            .key_down(self.selected_tile as usize, keycode, keymod);
+            .key_down(self.selected_tile, keycode, keymod);
         if let None = result {
             self.dirty = true;
             return;
@@ -328,14 +332,14 @@ impl event::EventHandler for Grid<'_> {
                 if !self.draw_tile {
                     self.draw_tile = true;
                 } else {
-                    self.tile_handler.act(self.selected_tile as usize);
+                    self.tile_handler.act(self.selected_tile);
                 }
             }
             KeyCode::Home => {
                 self.selected_tile = 0;
             }
             KeyCode::End => {
-                self.selected_tile = (self.tile_handler.tiles().len() - 1) as isize;
+                self.selected_tile = self.tile_handler.tiles().len() - 1;
             }
             KeyCode::Escape => {
                 if self.draw_tile {
