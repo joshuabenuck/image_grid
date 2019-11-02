@@ -13,7 +13,8 @@ pub enum TileAction {
 }
 
 pub trait TileHandler {
-    fn tiles(&self) -> &Vec<graphics::Image>;
+    fn tiles(&self) -> &Vec<usize>;
+    fn tile(&self, i: usize) -> &graphics::Image;
     fn act(&self, _i: usize) -> TileAction {
         TileAction::None
     }
@@ -52,10 +53,9 @@ impl<'a> Grid<'a> {
         tile_width: u16,
         tile_height: u16,
     ) -> Grid {
-        let images: &Vec<graphics::Image> = tile_handler.tiles();
+        let images = tile_handler.tiles().iter().map(|i| tile_handler.tile(*i));
         // Vec<(scale, width, height)>
-        let sizes: Vec<(f32, f32, f32)> = (&images)
-            .iter()
+        let sizes: Vec<(f32, f32, f32)> = images
             .map(|i| Grid::compute_size(i, tile_width as f32, tile_height as f32))
             .collect();
         let max_width = (&sizes).iter().map(|size| size.1).fold(0.0, f32::max) as u16;
@@ -145,7 +145,7 @@ impl event::EventHandler for Grid<'_> {
         while timer::check_update_time(ctx, DESIRED_FPS) {
             //println!("Delta frame time: {:?} ", timer::delta(ctx));
             //println!("Average FPS: {}", timer::fps(ctx));
-            thread::sleep(time::Duration::from_millis(10));
+            thread::sleep(time::Duration::from_millis(1000 / 40));
         }
         Ok(())
     }
@@ -165,8 +165,8 @@ impl event::EventHandler for Grid<'_> {
             start_at = row_of_selection;
         }
         let mut move_win_by = 0.0;
-        let tiles = self.tile_handler.tiles();
-        for (i, image) in tiles.iter().enumerate() {
+        for (i, ii) in self.tile_handler.tiles().iter().enumerate() {
+            let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
                 Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
             x = (self.margin_to_center
@@ -210,7 +210,7 @@ impl event::EventHandler for Grid<'_> {
                     ctx,
                     graphics::DrawMode::stroke(self.highlight_border as f32),
                     graphics::Rect::new(x + x_image_margin, y + y_image_margin, width, height),
-                    self.tile_handler.highlight_color(i),
+                    self.tile_handler.highlight_color(*ii),
                 )?;
                 graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
                 if y + self.tile_height as f32 > screen.y + screen.h {
@@ -233,7 +233,9 @@ impl event::EventHandler for Grid<'_> {
 
             // draw currently selected image
             // TODO: Move into Tile trait
-            let image = &self.tile_handler.tiles()[self.selected_tile as usize];
+            let image = &self
+                .tile_handler
+                .tile(self.tile_handler.tiles()[self.selected_tile as usize]);
             let scale = f32::min(
                 screen.w / image.width() as f32,
                 screen.h / image.height() as f32,
@@ -245,7 +247,7 @@ impl event::EventHandler for Grid<'_> {
             let dest_point = mint::Point2 { x, y };
             graphics::draw(
                 ctx,
-                image,
+                *image,
                 graphics::DrawParam::default()
                     .dest(dest_point)
                     .scale([scale, scale]),

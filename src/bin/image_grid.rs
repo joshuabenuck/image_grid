@@ -11,11 +11,16 @@ trait Game {}
 
 struct ImageTileHandler {
     tiles: Vec<graphics::Image>,
+    indexes: Vec<usize>,
 }
 
 impl TileHandler for ImageTileHandler {
-    fn tiles(&self) -> &Vec<graphics::Image> {
-        return &self.tiles;
+    fn tiles(&self) -> &Vec<usize> {
+        return &self.indexes;
+    }
+
+    fn tile(&self, i: usize) -> &graphics::Image {
+        &self.tiles[i]
     }
 }
 
@@ -88,9 +93,9 @@ fn main() -> GameResult {
         let max = max.parse().expect("Unable to parse max");
         loader.max(max);
     }
-    let mut handler = ImageTileHandler {
-        tiles: loader.load_all(&mut ctx)?,
-    };
+    let tiles = loader.load_all(&mut ctx)?;
+    let indexes = (0..tiles.len()).collect();
+    let mut handler = ImageTileHandler { tiles, indexes };
 
     let mut grid = Grid::new(
         Box::new(&mut handler),
