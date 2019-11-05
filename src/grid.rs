@@ -52,6 +52,7 @@ pub struct Grid<'a> {
     margin_to_center: usize,
     coords_to_select: Option<(f32, f32)>,
     draw_tile: bool,
+    pub allow_draw_tile: bool,
     dirty: bool,
 }
 
@@ -82,6 +83,7 @@ impl<'a> Grid<'a> {
             margin_to_center: 0,
             coords_to_select: None,
             draw_tile: false,
+            allow_draw_tile: true,
             dirty: true,
         }
     }
@@ -177,6 +179,7 @@ impl event::EventHandler for Grid<'_> {
         if self.selected_tile >= tiles.len() {
             self.selected_tile = tiles.len() - 1;
         }
+        let mut launch = false;
         for (i, ii) in tiles.iter().enumerate() {
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
@@ -197,6 +200,9 @@ impl event::EventHandler for Grid<'_> {
                     && y_coord >= y
                     && y_coord <= y + self.tile_height as f32
                 {
+                    if self.selected_tile == i {
+                        launch = true;
+                    }
                     self.selected_tile = i;
                     self.coords_to_select = None;
                 }
@@ -232,6 +238,9 @@ impl event::EventHandler for Grid<'_> {
                     move_win_by = -height;
                 }
             }
+        }
+        if launch {
+            self.key_down_event(ctx, KeyCode::Return, KeyMods::NONE, false);
         }
         if self.draw_tile {
             // draw overlay
@@ -280,12 +289,14 @@ impl event::EventHandler for Grid<'_> {
     fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
         let screen = graphics::screen_coordinates(ctx);
         self.select_tile_under(x, y + screen.y);
+        self.dirty = true;
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
         if y > 0.0 {
             if self.draw_tile {
                 self.left();
+                self.dirty = true;
                 return;
             }
             self.up();
@@ -293,10 +304,12 @@ impl event::EventHandler for Grid<'_> {
         if y < 0.0 {
             if self.draw_tile {
                 self.right();
+                self.dirty = true;
                 return;
             }
             self.down();
         }
+        self.dirty = true;
     }
 
     fn key_down_event(
@@ -329,10 +342,11 @@ impl event::EventHandler for Grid<'_> {
                 self.right();
             }
             KeyCode::Return => {
-                if !self.draw_tile {
+                if self.allow_draw_tile && !self.draw_tile {
                     self.draw_tile = true;
                 } else {
-                    self.tile_handler.act(self.selected_tile);
+                    self.tile_handler
+                        .act(self.tile_handler.tiles()[self.selected_tile]);
                 }
             }
             KeyCode::Home => {
