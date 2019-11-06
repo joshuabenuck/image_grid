@@ -1,11 +1,16 @@
-use crate::dispatcher::{NextAction, Widget};
 use failure::Error;
-use ggez::event::{self, KeyCode, KeyMods, MouseButton};
-use ggez::{self, graphics, timer, Context, GameResult};
+use graphics::ImageSize;
+use opengl_graphics::Texture;
+use piston::input::{
+    keyboard::{Key, ModifierKey},
+    RenderArgs,
+};
 use std::cmp::{max, min};
 use std::process::Child;
 use std::thread;
 use std::time;
+
+pub type Color = [f32; 4];
 
 pub enum TileAction {
     None,
@@ -15,26 +20,26 @@ pub enum TileAction {
 pub trait TileHandler {
     fn tiles(&self) -> &Vec<usize>;
 
-    fn tile(&self, i: usize) -> &graphics::Image;
+    fn tile(&self, i: usize) -> &Texture;
 
     fn act(&self, _i: usize) -> TileAction {
         TileAction::None
     }
 
-    fn highlight_color(&self, _i: usize) -> graphics::Color {
-        graphics::WHITE
+    fn highlight_color(&self, _i: usize) -> Color {
+        [1.0, 1.0, 1.0, 1.0]
     }
 
-    fn background_color(&self) -> graphics::Color {
-        [0.1, 0.2, 0.3, 1.0].into()
+    fn background_color(&self) -> Color {
+        [0.1, 0.2, 0.3, 1.0]
     }
 
     fn key_down(
         &mut self,
         _i: usize,
-        keycode: KeyCode,
-        keymod: KeyMods,
-    ) -> Option<(KeyCode, KeyMods)> {
+        keycode: Key,
+        keymod: ModifierKey,
+    ) -> Option<(Key, ModifierKey)> {
         return Some((keycode, keymod));
     }
 }
@@ -135,45 +140,57 @@ impl<'a> Grid<'a> {
         self.coords_to_select = Some((x, y));
     }
 
-    fn compute_size(image: &graphics::Image, w: f32, h: f32) -> (f32, f32, f32) {
-        let scale = f32::min(w / image.width() as f32, h / image.height() as f32);
-        let width = image.width() as f32 * scale;
-        let height = image.height() as f32 * scale;
+    fn compute_size(image: &Texture, w: f32, h: f32) -> (f32, f32, f32) {
+        let (width, height) = image.get_size();
+        let scale = f32::min(w / width as f32, h / height as f32);
+        let width = width as f32 * scale;
+        let height = height as f32 * scale;
         (scale, width, height)
     }
 }
 
-impl Widget for Grid<'_> {
+/*impl Widget for Grid<'_> {
     fn next(&self) -> NextAction {
         return NextAction::None;
     }
+}*/
+
+pub type GridResult<T> = Result<T, Error>;
+
+pub trait EventHandler {
+    fn update(&mut self) -> GridResult<()>;
+    fn draw(&mut self, args: &RenderArgs) -> GridResult<()>;
+    fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, repeat: bool);
+    fn key_up_event(&mut self, keycode: Key, keymod: ModifierKey);
+    //fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32);
+    //fn mouse_wheel_event(&mut self, _x: f32, y: f32);
 }
 
-impl event::EventHandler for Grid<'_> {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
+impl EventHandler for Grid<'_> {
+    fn update(&mut self) -> GridResult<()> {
         const DESIRED_FPS: u32 = 20;
-        while timer::check_update_time(ctx, DESIRED_FPS) {
-            //println!("Delta frame time: {:?} ", timer::delta(ctx));
-            //println!("Average FPS: {}", timer::fps(ctx));
-            thread::sleep(time::Duration::from_millis(1000 / 40));
-        }
+        //while timer::check_update_time(ctx, DESIRED_FPS) {
+        //println!("Delta frame time: {:?} ", timer::delta(ctx));
+        //println!("Average FPS: {}", timer::fps(ctx));
+        //thread::sleep(time::Duration::from_millis(1000 / 40));
+        //}
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+    fn draw(&mut self, args: &RenderArgs) -> GridResult<()> {
         if !self.dirty {
             return Ok(());
         }
-        graphics::clear(ctx, self.tile_handler.background_color());
+        //graphics::clear(ctx, self.tile_handler.background_color());
         let mut x;
         let mut y = self.border_margin as f32;
-        let mut screen = graphics::screen_coordinates(ctx);
-        let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
-            * self.tiles_per_row;
+        //let mut screen = graphics::screen_coordinates(ctx);
+        //let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
+        //* self.tiles_per_row;
         let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
-        if start_at > row_of_selection {
-            start_at = row_of_selection;
-        }
+        //if start_at > row_of_selection {
+        //start_at = row_of_selection;
+        //}
         let mut move_win_by = 0.0;
         let tiles = self.tile_handler.tiles();
         if self.selected_tile >= tiles.len() {
@@ -192,9 +209,10 @@ impl event::EventHandler for Grid<'_> {
                 + i % self.tiles_per_row * self.margin) as f32;
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
-                if i > self.selected_tile && y > (screen.y + screen.h) {
-                    break;
-                }
+                // Optimization to only draw a single page of images
+                //if i > self.selected_tile && y > (screen.y + screen.h) {
+                //    break;
+                //}
             }
             if let Some((x_coord, y_coord)) = self.coords_to_select {
                 if x_coord >= x
@@ -210,24 +228,24 @@ impl event::EventHandler for Grid<'_> {
                     selection_changed = true;
                 }
             }
-            if i < start_at {
+            /*if i < start_at {
                 continue;
-            }
+            }*/
             let x_image_margin = (self.tile_width as f32 - width) / 2.0;
             let y_image_margin = (self.tile_height as f32 - height) / 2.0;
             let dest_point = mint::Point2 {
                 x: x + x_image_margin,
                 y: y + y_image_margin,
             };
-            graphics::draw(
+            /*graphics::draw(
                 ctx,
                 image,
                 graphics::DrawParam::default()
                     .dest(dest_point)
                     .scale([scale, scale]),
-            )?;
+            )?;*/
             if i == self.selected_tile {
-                let rectangle = graphics::Mesh::new_rectangle(
+                /*let rectangle = graphics::Mesh::new_rectangle(
                     ctx,
                     graphics::DrawMode::stroke(self.highlight_border as f32),
                     graphics::Rect::new(x + x_image_margin, y + y_image_margin, width, height),
@@ -239,33 +257,34 @@ impl event::EventHandler for Grid<'_> {
                 }
                 if y < screen.y {
                     move_win_by = -height;
-                }
+                }*/
             }
         }
         if launch {
-            self.key_down_event(ctx, KeyCode::Return, KeyMods::NONE, false);
+            self.key_down_event(Key::Return, ModifierKey::NO_MODIFIER, false);
         }
         if self.draw_tile {
             // draw overlay
-            let rectangle = graphics::Mesh::new_rectangle(
+            /*let rectangle = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
                 graphics::Rect::new(0.0, screen.y, screen.w, screen.h),
                 graphics::Color::from([1.0, 1.0, 1.0, 1.0]),
             )?;
-            graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
+            graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;*/
 
             // draw currently selected image
             // TODO: Move into Tile trait
             let image = &self
                 .tile_handler
                 .tile(self.tile_handler.tiles()[self.selected_tile]);
-            let scale = f32::min(
-                screen.w / image.width() as f32,
-                screen.h / image.height() as f32,
+            let (width, height) = image.get_size();
+            /*let scale = f32::min(
+                screen.w / width as f32,
+                screen.h / height as f32,
             );
-            let width = image.width() as f32 * scale;
-            let height = image.height() as f32 * scale;
+            let width = width as f32 * scale;
+            let height = height as f32 * scale;
             let x = (screen.w - width) / 2.0;
             let y = (screen.h - height) / 2.0 + screen.y;
             let dest_point = mint::Point2 { x, y };
@@ -275,23 +294,23 @@ impl event::EventHandler for Grid<'_> {
                 graphics::DrawParam::default()
                     .dest(dest_point)
                     .scale([scale, scale]),
-            )?;
+            )?;*/
         }
         if !selection_changed {
             self.dirty = false;
         }
-        if move_win_by != 0.0 {
+        /*if move_win_by != 0.0 {
             screen.y += move_win_by;
             graphics::set_screen_coordinates(ctx, screen)?;
             self.dirty = true;
-        }
+        }*/
 
-        graphics::present(ctx)?;
-        timer::yield_now();
+        //graphics::present(ctx)?;
+        //timer::yield_now();
         Ok(())
     }
 
-    fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
+    /*fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
         let screen = graphics::screen_coordinates(ctx);
         self.select_tile_under(x, y + screen.y);
         self.dirty = true;
@@ -315,15 +334,9 @@ impl event::EventHandler for Grid<'_> {
             self.down();
         }
         self.dirty = true;
-    }
+    }*/
 
-    fn key_down_event(
-        &mut self,
-        ctx: &mut Context,
-        keycode: KeyCode,
-        keymod: KeyMods,
-        _repeat: bool,
-    ) {
+    fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, _repeat: bool) {
         let result = self
             .tile_handler
             .key_down(self.selected_tile, keycode, keymod);
@@ -333,20 +346,20 @@ impl event::EventHandler for Grid<'_> {
         }
         let (keycode, keymod) = result.unwrap();
         match keycode {
-            KeyCode::E => if keymod.contains(KeyMods::CTRL) {},
-            KeyCode::Up => {
+            Key::E => if keymod.contains(ModifierKey::CTRL) {},
+            Key::Up => {
                 self.up();
             }
-            KeyCode::Down => {
+            Key::Down => {
                 self.down();
             }
-            KeyCode::Left => {
+            Key::Left => {
                 self.left();
             }
-            KeyCode::Right => {
+            Key::Right => {
                 self.right();
             }
-            KeyCode::Return => {
+            Key::Return => {
                 if self.allow_draw_tile && !self.draw_tile {
                     self.draw_tile = true;
                 } else {
@@ -354,18 +367,18 @@ impl event::EventHandler for Grid<'_> {
                         .act(self.tile_handler.tiles()[self.selected_tile]);
                 }
             }
-            KeyCode::Home => {
+            Key::Home => {
                 self.selected_tile = 0;
             }
-            KeyCode::End => {
+            Key::End => {
                 self.selected_tile = self.tile_handler.tiles().len() - 1;
             }
-            KeyCode::Escape => {
+            Key::Escape => {
                 if self.draw_tile {
                     self.draw_tile = false;
                     self.dirty = true;
                 } else {
-                    ggez::event::quit(ctx);
+                    //ggez::event::quit(ctx);
                 }
             }
             _ => {
@@ -375,7 +388,7 @@ impl event::EventHandler for Grid<'_> {
         self.dirty = true;
     }
 
-    fn key_up_event(&mut self, _ctx: &mut Context, keycode: KeyCode, _keymod: KeyMods) {
+    fn key_up_event(&mut self, keycode: Key, _keymod: ModifierKey) {
         match keycode {
             _ => {
                 return ();
@@ -383,12 +396,12 @@ impl event::EventHandler for Grid<'_> {
         }
     }
 
-    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
+    /*fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
         println!("Resized screen to {}, {}", width, height);
         let mut screen = graphics::screen_coordinates(ctx);
         screen.w = width as f32;
         screen.h = height as f32;
         graphics::set_screen_coordinates(ctx, screen).unwrap();
         self.resize(screen.w);
-    }
+    }*/
 }
