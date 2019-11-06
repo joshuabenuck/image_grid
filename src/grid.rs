@@ -180,6 +180,8 @@ impl event::EventHandler for Grid<'_> {
             self.selected_tile = tiles.len() - 1;
         }
         let mut launch = false;
+        // selection changed is a hack until tile coords can be pre-computed
+        let mut selection_changed = false;
         for (i, ii) in tiles.iter().enumerate() {
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
@@ -205,6 +207,7 @@ impl event::EventHandler for Grid<'_> {
                     }
                     self.selected_tile = i;
                     self.coords_to_select = None;
+                    selection_changed = true;
                 }
             }
             if i < start_at {
@@ -274,7 +277,9 @@ impl event::EventHandler for Grid<'_> {
                     .scale([scale, scale]),
             )?;
         }
-        self.dirty = false;
+        if !selection_changed {
+            self.dirty = false;
+        }
         if move_win_by != 0.0 {
             screen.y += move_win_by;
             graphics::set_screen_coordinates(ctx, screen)?;
