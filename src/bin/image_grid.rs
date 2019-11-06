@@ -3,10 +3,11 @@ extern crate image_grid;
 use clap::{App, Arg};
 use image_grid::{
     dispatcher,
-    grid::{self, Grid, GridResult, TileHandler},
+    grid::{self, EventHandler, Grid, GridResult, TileHandler},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
+use std::path::PathBuf;
 
 trait Game {}
 
@@ -122,11 +123,26 @@ fn main() -> GridResult<()> {
         )
         .get_matches();
 
+    let mut loader = ImageLoader::new();
+    if let Some(filters) = matches.values_of("filter") {
+        for filter in filters {
+            loader.filter(filter);
+        }
+    }
+    if let Some(onlys) = matches.values_of("only") {
+        for only in onlys {
+            loader.only(only);
+        }
+    }
+    if let Some(max) = matches.value_of("max") {
+        let max = max.parse().expect("Unable to parse max");
+        loader.max(max);
+    }
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
 
     // Create an Glutin window.
-    let mut window: Window = WindowSettings::new("spinning-square", [200, 200])
+    let mut window: Window = WindowSettings::new("Doorways", [800, 600])
         .graphics_api(opengl)
         .exit_on_esc(true)
         .build()
@@ -138,14 +154,35 @@ fn main() -> GridResult<()> {
         rotation: 0.0,
     };
 
+    let tiles = loader.load_all(PathBuf::from(
+        matches.value_of("dir").expect("Must specify a directory!"),
+    ))?;
+    let indexes = (0..tiles.len()).collect();
+    let mut handler = ImageTileHandler { tiles, indexes };
+    let mut grid = Grid::new(
+        Box::new(&mut handler),
+        matches
+            .value_of("tile-width")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap(),
+        matches
+            .value_of("tile-height")
+            .unwrap()
+            .parse::<u16>()
+            .unwrap(),
+    );
+
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
         if let Some(r) = e.render_args() {
             app.render(&r);
+            grid.draw(&r)?;
         }
 
         if let Some(u) = e.update_args() {
             app.update(&u);
+            grid.update()?;
         }
 
         if let Some(p) = e.press_args() {
@@ -160,41 +197,7 @@ fn main() -> GridResult<()> {
         }
     }
     /*
-        let cb = ggez::ContextBuilder::new("Image Grid", "Joshua Benuck")
-            .add_resource_path(matches.value_of("dir").expect("Must specify a directory!"));
-        let (mut ctx, mut event_loop) = cb.build()?;
-        let mut loader = ImageLoader::new();
-        if let Some(filters) = matches.values_of("filter") {
-            for filter in filters {
-                loader.filter(filter);
-            }
-        }
-        if let Some(onlys) = matches.values_of("only") {
-            for only in onlys {
-                loader.only(only);
-            }
-        }
-        if let Some(max) = matches.value_of("max") {
-            let max = max.parse().expect("Unable to parse max");
-            loader.max(max);
-        }
-        let tiles = loader.load_all(&mut ctx)?;
-        let indexes = (0..tiles.len()).collect();
-        let mut handler = ImageTileHandler { tiles, indexes };
 
-        let mut grid = Grid::new(
-            Box::new(&mut handler),
-            matches
-                .value_of("tile-width")
-                .unwrap()
-                .parse::<u16>()
-                .unwrap(),
-            matches
-                .value_of("tile-height")
-                .unwrap()
-                .parse::<u16>()
-                .unwrap(),
-        );
         graphics::set_resizable(&mut ctx, true)?;
         event::run(&mut ctx, &mut event_loop, &mut grid)?;
     */

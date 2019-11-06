@@ -1,6 +1,12 @@
-use ggez::{self, filesystem, graphics, Context, GameResult};
+use crate::grid::GridResult;
+use failure::{err_msg, Error};
+use find_folder;
+use graphics::ImageSize;
 use image::imageops;
+use opengl_graphics::{Texture, TextureSettings};
+use piston::window::Window;
 use regex::Regex;
+use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -32,9 +38,9 @@ impl ImageLoader {
         self.max_count = Some(max);
     }
 
-    pub fn load_all(&self, ctx: &mut Context) -> GameResult<Vec<graphics::Image>> {
+    pub fn load_all(&self, path: PathBuf) -> GridResult<Vec<Texture>> {
         let mut images = Vec::new();
-        let files = filesystem::read_dir(ctx, "/")?;
+        let files = path.read_dir()?;
         let mut count = 0;
         let must_not_match: Vec<Regex> = self
             .must_not_match
@@ -47,6 +53,7 @@ impl ImageLoader {
             .map(|f| Regex::new(f).expect(format!("Regex error for 'only': {}", f).as_str()))
             .collect();
         'fileloop: for file in files {
+            let file = file?.path();
             // Is there a way to do this more concisely?
             if let Some(max) = self.max_count {
                 if count >= max {
@@ -67,12 +74,12 @@ impl ImageLoader {
                 }
             }
             for regex in &must_not_match {
-                println!("{}, {:?}", &filestr, regex);
+                //println!("{}, {:?}", &filestr, regex);
                 if regex.is_match(&filestr) {
                     continue 'fileloop;
                 }
             }
-            let image = self.load(ctx, &file);
+            let image = self.load(&file);
             match image {
                 Ok(i) => {
                     count += 1;
@@ -84,20 +91,15 @@ impl ImageLoader {
         Ok(images)
     }
 
-    fn load_file(&self, ctx: &mut Context, file: &PathBuf) -> GameResult<image::RgbaImage> {
-        let mut buf = Vec::new();
-        let mut reader = filesystem::open(ctx, file)?;
-        let _ = reader.read_to_end(&mut buf)?;
-        Ok(image::load_from_memory(&buf)?.to_rgba())
+    fn load(&self, file: &PathBuf) -> GridResult<Texture> {
+        let texture = Texture::from_path(&file, &TextureSettings::new());
+        match texture {
+            Ok(t) => Ok(t),
+            Err(msg) => Err(err_msg(msg)),
+        }
     }
 
-    fn load(&self, ctx: &mut Context, file: &PathBuf) -> GameResult<graphics::Image> {
-        let image = self.load_file(ctx, file)?;
-        let (width, height) = image.dimensions();
-        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
-    }
-
-    fn load_and_resize(
+    /*fn load_and_resize(
         &self,
         ctx: &mut Context,
         file: &PathBuf,
@@ -113,5 +115,5 @@ impl ImageLoader {
         );
         let (width, height) = image.dimensions();
         graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
-    }
+    }*/
 }

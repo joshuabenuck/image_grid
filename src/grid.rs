@@ -76,6 +76,12 @@ impl<'a> Grid<'a> {
         let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
         let tile_width = min(max_width, tile_width);
         let tile_height = min(max_height, tile_height);
+        println!(
+            "count {}, tile_width {}, tile_height {}",
+            tile_handler.tiles().len(),
+            tile_width,
+            tile_height
+        );
         Grid {
             tile_handler,
             margin: 5,
@@ -84,7 +90,7 @@ impl<'a> Grid<'a> {
             border_margin: 20,
             selected_tile: 0,
             highlight_border: 2,
-            tiles_per_row: 0,
+            tiles_per_row: 10,
             margin_to_center: 0,
             coords_to_select: None,
             draw_tile: false,
@@ -187,7 +193,7 @@ impl EventHandler for Grid<'_> {
         //let mut screen = graphics::screen_coordinates(ctx);
         //let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
         //* self.tiles_per_row;
-        let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
+        //let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
         //if start_at > row_of_selection {
         //start_at = row_of_selection;
         //}
