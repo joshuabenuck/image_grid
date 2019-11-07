@@ -8,6 +8,8 @@ use image_grid::{
 };
 use opengl_graphics::Texture;
 use std::path::PathBuf;
+use std::thread;
+use std::time;
 
 trait Game {}
 
@@ -29,47 +31,8 @@ impl TileHandler for ImageTileHandler {
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::*;
-use piston::input::{
-    keyboard::Key, Button, PressEvent, RenderArgs, RenderEvent, UpdateArgs, UpdateEvent,
-};
+use piston::input::{keyboard::Key, Button, PressEvent, RenderEvent, UpdateEvent};
 use piston::window::WindowSettings;
-
-pub struct ImageViewerApp {
-    gl: GlGraphics, // OpenGL drawing backend.
-    rotation: f64,  // Rotation for the square.
-}
-
-impl ImageViewerApp {
-    fn render(&mut self, args: &RenderArgs) {
-        use graphics::*;
-
-        const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-        const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-
-        let square = rectangle::square(0.0, 0.0, 50.0);
-        let rotation = self.rotation;
-        let (x, y) = (args.window_size[0] / 2.0, args.window_size[1] / 2.0);
-
-        self.gl.draw(args.viewport(), |c, gl| {
-            // Clear the screen.
-            clear(GREEN, gl);
-
-            let transform = c
-                .transform
-                .trans(x, y)
-                .rot_rad(rotation)
-                .trans(-25.0, -25.0);
-
-            // Draw a box rotating around the middle of the screen.
-            rectangle(RED, square, transform, gl);
-        });
-    }
-
-    fn update(&mut self, args: &UpdateArgs) {
-        // Rotate 2 radians per second.
-        self.rotation += 2.0 * args.dt;
-    }
-}
 
 fn main() -> GridResult<()> {
     let matches = App::new("image_grid")
@@ -143,16 +106,14 @@ fn main() -> GridResult<()> {
 
     // Create an Glutin window.
     let mut window: Window = WindowSettings::new("Doorways", [800, 600])
+        .vsync(true)
         .graphics_api(opengl)
         .exit_on_esc(true)
         .build()
         .unwrap();
 
-    // Create a new game and run it.
-    let mut app = ImageViewerApp {
-        gl: GlGraphics::new(opengl),
-        rotation: 0.0,
-    };
+    let mut gl = GlGraphics::new(opengl);
+    //let mut app = ImageViewerApp { gl, rotation: 0.0 };
 
     let tiles = loader.load_all(PathBuf::from(
         matches.value_of("dir").expect("Must specify a directory!"),
@@ -173,16 +134,19 @@ fn main() -> GridResult<()> {
             .unwrap(),
     );
 
-    let mut events = Events::new(EventSettings::new());
+    let mut settings = EventSettings::new();
+    settings.set_lazy(true);
+    settings.swap_buffers(true);
+    settings.max_fps(1);
+    settings.ups(1);
+    let mut events = Events::new(settings);
     while let Some(e) = events.next(&mut window) {
         if let Some(r) = e.render_args() {
-            app.render(&r);
-            grid.draw(&r)?;
+            grid.draw(&mut gl, &r)?;
         }
 
-        if let Some(u) = e.update_args() {
-            app.update(&u);
-            grid.update()?;
+        if let Some(_u) = e.update_args() {
+            grid.update(&mut gl)?;
         }
 
         if let Some(p) = e.press_args() {

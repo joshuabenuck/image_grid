@@ -1,6 +1,6 @@
 use failure::Error;
-use graphics::ImageSize;
-use opengl_graphics::Texture;
+use graphics::{Graphics, Image, ImageSize, Transformed};
+use opengl_graphics::{GlGraphics, OpenGL, Texture};
 use piston::input::{
     keyboard::{Key, ModifierKey},
     RenderArgs,
@@ -164,8 +164,8 @@ impl<'a> Grid<'a> {
 pub type GridResult<T> = Result<T, Error>;
 
 pub trait EventHandler {
-    fn update(&mut self) -> GridResult<()>;
-    fn draw(&mut self, args: &RenderArgs) -> GridResult<()>;
+    fn update(&mut self, gl: &mut GlGraphics) -> GridResult<()>;
+    fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()>;
     fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, repeat: bool);
     fn key_up_event(&mut self, keycode: Key, keymod: ModifierKey);
     //fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32);
@@ -173,7 +173,7 @@ pub trait EventHandler {
 }
 
 impl EventHandler for Grid<'_> {
-    fn update(&mut self) -> GridResult<()> {
+    fn update(&mut self, _gl: &mut GlGraphics) -> GridResult<()> {
         const DESIRED_FPS: u32 = 20;
         //while timer::check_update_time(ctx, DESIRED_FPS) {
         //println!("Delta frame time: {:?} ", timer::delta(ctx));
@@ -183,20 +183,29 @@ impl EventHandler for Grid<'_> {
         Ok(())
     }
 
-    fn draw(&mut self, args: &RenderArgs) -> GridResult<()> {
+    fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()> {
         if !self.dirty {
             return Ok(());
         }
         //graphics::clear(ctx, self.tile_handler.background_color());
+        let mut viewport = args.viewport();
+        gl.draw(viewport, |_c, gl| {
+            use graphics::clear;
+            clear(self.tile_handler.background_color(), gl);
+            // gl.clear_color(self.tile_handler.background_color());
+            // gl.clear_stencil(0);
+        });
         let mut x;
         let mut y = self.border_margin as f32;
+        let [win_width, win_height] = args.window_size;
         //let mut screen = graphics::screen_coordinates(ctx);
-        //let mut start_at = (screen.y as usize) / (self.tile_height as usize + self.margin) as usize
-        //* self.tiles_per_row;
-        //let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
-        //if start_at > row_of_selection {
-        //start_at = row_of_selection;
-        //}
+        let mut start_at = (viewport.rect[1] as usize)
+            / (self.tile_height as usize + self.margin) as usize
+            * self.tiles_per_row;
+        let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
+        if start_at > row_of_selection {
+            start_at = row_of_selection;
+        }
         let mut move_win_by = 0.0;
         let tiles = self.tile_handler.tiles();
         if self.selected_tile >= tiles.len() {
@@ -250,6 +259,10 @@ impl EventHandler for Grid<'_> {
                     .dest(dest_point)
                     .scale([scale, scale]),
             )?;*/
+            gl.draw(viewport, |c, gl| {
+                let transform = c.transform.trans(x.into(), y.into()).zoom(scale.into());
+                Image::new().draw(image, &Default::default(), transform, gl);
+            });
             if i == self.selected_tile {
                 /*let rectangle = graphics::Mesh::new_rectangle(
                     ctx,
@@ -303,7 +316,7 @@ impl EventHandler for Grid<'_> {
             )?;*/
         }
         if !selection_changed {
-            self.dirty = false;
+            //self.dirty = false;
         }
         /*if move_win_by != 0.0 {
             screen.y += move_win_by;
