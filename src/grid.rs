@@ -1,5 +1,5 @@
 use failure::Error;
-use graphics::{Graphics, Image, ImageSize, Transformed};
+use graphics::{DrawState, Graphics, Image, ImageSize, Transformed};
 use opengl_graphics::{GlGraphics, OpenGL, Texture};
 use piston::input::{
     keyboard::{Key, ModifierKey},
@@ -59,6 +59,8 @@ pub struct Grid<'a> {
     draw_tile: bool,
     pub allow_draw_tile: bool,
     dirty: bool,
+    width: f64,
+    scroll_pos: f64,
 }
 
 impl<'a> Grid<'a> {
@@ -96,6 +98,8 @@ impl<'a> Grid<'a> {
             draw_tile: false,
             allow_draw_tile: true,
             dirty: true,
+            width: 0.0,
+            scroll_pos: 0.0,
         }
     }
 
@@ -188,17 +192,19 @@ impl EventHandler for Grid<'_> {
             return Ok(());
         }
         //graphics::clear(ctx, self.tile_handler.background_color());
+        let [win_width, win_height] = args.window_size;
+        if win_width != self.width {
+            self.resize(win_width as f32);
+            self.width = win_width;
+        }
         let mut viewport = args.viewport();
+        //viewport.rect[1] = self.scroll_pos as i32;
         gl.draw(viewport, |_c, gl| {
             use graphics::clear;
             clear(self.tile_handler.background_color(), gl);
-            // gl.clear_color(self.tile_handler.background_color());
-            // gl.clear_stencil(0);
         });
         let mut x;
         let mut y = self.border_margin as f32;
-        let [win_width, win_height] = args.window_size;
-        //let mut screen = graphics::screen_coordinates(ctx);
         let mut start_at = (viewport.rect[1] as usize)
             / (self.tile_height as usize + self.margin) as usize
             * self.tiles_per_row;
@@ -225,10 +231,11 @@ impl EventHandler for Grid<'_> {
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
                 // Optimization to only draw a single page of images
-                //if i > self.selected_tile && y > (screen.y + screen.h) {
+                //if i > self.selected_tile && y > (self.scroll_pos as f32 + win_height as f32) {
                 //    break;
                 //}
             }
+            // Handle mouse selection of tiles
             if let Some((x_coord, y_coord)) = self.coords_to_select {
                 if x_coord >= x
                     && x_coord <= x + self.tile_width as f32
@@ -243,16 +250,16 @@ impl EventHandler for Grid<'_> {
                     selection_changed = true;
                 }
             }
-            /*if i < start_at {
-                continue;
-            }*/
+            // if i < start_at {
+            // continue;
+            // }
             let x_image_margin = (self.tile_width as f32 - width) / 2.0;
             let y_image_margin = (self.tile_height as f32 - height) / 2.0;
-            let dest_point = mint::Point2 {
+            /*let dest_point = mint::Point2 {
                 x: x + x_image_margin,
                 y: y + y_image_margin,
             };
-            /*graphics::draw(
+            graphics::draw(
                 ctx,
                 image,
                 graphics::DrawParam::default()
@@ -260,23 +267,41 @@ impl EventHandler for Grid<'_> {
                     .scale([scale, scale]),
             )?;*/
             gl.draw(viewport, |c, gl| {
-                let transform = c.transform.trans(x.into(), y.into()).zoom(scale.into());
-                Image::new().draw(image, &Default::default(), transform, gl);
+                //let y = y - self.scroll_pos as f32;
+                let transform = c
+                    .transform
+                    .trans(x.into(), y as f64)
+                    .trans(0.0, -self.scroll_pos)
+                    .zoom(scale.into());
+                let state = DrawState::default();
+                Image::new().draw(image, &state, transform, gl);
             });
             if i == self.selected_tile {
-                /*let rectangle = graphics::Mesh::new_rectangle(
-                    ctx,
-                    graphics::DrawMode::stroke(self.highlight_border as f32),
-                    graphics::Rect::new(x + x_image_margin, y + y_image_margin, width, height),
-                    self.tile_handler.highlight_color(*ii),
-                )?;
-                graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;
-                if y + self.tile_height as f32 > screen.y + screen.h {
+                //let y = y - self.scroll_pos as f32;
+                gl.draw(viewport, |c, gl| {
+                    let rect = graphics::rectangle::Rectangle::new_border(
+                        self.tile_handler.highlight_color(*ii),
+                        self.highlight_border as f64,
+                    );
+                    let transform = c.transform.trans(0.0, 0.0).trans(0.0, -self.scroll_pos);
+                    rect.draw(
+                        [
+                            (x + x_image_margin) as f64,
+                            (y + y_image_margin) as f64,
+                            width as f64,
+                            height as f64,
+                        ],
+                        &Default::default(),
+                        transform,
+                        gl,
+                    );
+                });
+                if y as f64 + self.tile_height as f64 > self.scroll_pos + win_height as f64 {
                     move_win_by = height;
                 }
-                if y < screen.y {
+                if (y as f64) < self.scroll_pos {
                     move_win_by = -height;
-                }*/
+                }
             }
         }
         if launch {
@@ -318,14 +343,11 @@ impl EventHandler for Grid<'_> {
         if !selection_changed {
             //self.dirty = false;
         }
-        /*if move_win_by != 0.0 {
-            screen.y += move_win_by;
-            graphics::set_screen_coordinates(ctx, screen)?;
+        if move_win_by != 0.0 {
+            self.scroll_pos += move_win_by as f64;
             self.dirty = true;
-        }*/
+        }
 
-        //graphics::present(ctx)?;
-        //timer::yield_now();
         Ok(())
     }
 
@@ -414,13 +436,4 @@ impl EventHandler for Grid<'_> {
             }
         }
     }
-
-    /*fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) {
-        println!("Resized screen to {}, {}", width, height);
-        let mut screen = graphics::screen_coordinates(ctx);
-        screen.w = width as f32;
-        screen.h = height as f32;
-        graphics::set_screen_coordinates(ctx, screen).unwrap();
-        self.resize(screen.w);
-    }*/
 }

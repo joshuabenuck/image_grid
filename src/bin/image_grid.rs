@@ -31,7 +31,7 @@ impl TileHandler for ImageTileHandler {
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::*;
-use piston::input::{keyboard::Key, Button, PressEvent, RenderEvent, UpdateEvent};
+use piston::input::{keyboard::ModifierKey, Button, PressEvent, RenderEvent, UpdateEvent};
 use piston::window::WindowSettings;
 
 fn main() -> GridResult<()> {
@@ -106,6 +106,7 @@ fn main() -> GridResult<()> {
 
     // Create an Glutin window.
     let mut window: Window = WindowSettings::new("Doorways", [800, 600])
+        .resizable(true)
         .vsync(true)
         .graphics_api(opengl)
         .exit_on_esc(true)
@@ -152,9 +153,7 @@ fn main() -> GridResult<()> {
         if let Some(p) = e.press_args() {
             match p {
                 Button::Keyboard(key) => {
-                    if key == Key::Space {
-                        println!("Space!")
-                    }
+                    grid.key_down_event(key, ModifierKey::NO_MODIFIER, false);
                 }
                 _ => {}
             }
