@@ -191,14 +191,16 @@ impl EventHandler for Grid<'_> {
         if !self.dirty {
             return Ok(());
         }
-        //graphics::clear(ctx, self.tile_handler.background_color());
+
+        // handle window resize
         let [win_width, win_height] = args.window_size;
         if win_width != self.width {
             self.resize(win_width as f32);
             self.width = win_width;
         }
-        let mut viewport = args.viewport();
-        //viewport.rect[1] = self.scroll_pos as i32;
+        let viewport = args.viewport();
+
+        // clear the screen
         gl.draw(viewport, |_c, gl| {
             use graphics::clear;
             clear(self.tile_handler.background_color(), gl);
@@ -218,8 +220,7 @@ impl EventHandler for Grid<'_> {
             self.selected_tile = tiles.len() - 1;
         }
         let mut launch = false;
-        // selection changed is a hack until tile coords can be pre-computed
-        let mut selection_changed = false;
+
         for (i, ii) in tiles.iter().enumerate() {
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
@@ -228,13 +229,17 @@ impl EventHandler for Grid<'_> {
                 + self.border_margin
                 + i % self.tiles_per_row * self.tile_width as usize
                 + i % self.tiles_per_row * self.margin) as f32;
+
+            // Increment y when we start a new row
             if i != 0 && i % self.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height as usize) as f32;
+
                 // Optimization to only draw a single page of images
-                //if i > self.selected_tile && y > (self.scroll_pos as f32 + win_height as f32) {
-                //    break;
-                //}
+                if i > self.selected_tile && y > (self.scroll_pos as f32 + win_height as f32) {
+                    break;
+                }
             }
+
             // Handle mouse selection of tiles
             if let Some((x_coord, y_coord)) = self.coords_to_select {
                 if x_coord >= x
@@ -247,37 +252,29 @@ impl EventHandler for Grid<'_> {
                     }
                     self.selected_tile = i;
                     self.coords_to_select = None;
-                    selection_changed = true;
                 }
             }
-            // if i < start_at {
-            // continue;
-            // }
-            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
-            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
-            /*let dest_point = mint::Point2 {
-                x: x + x_image_margin,
-                y: y + y_image_margin,
-            };
-            graphics::draw(
-                ctx,
-                image,
-                graphics::DrawParam::default()
-                    .dest(dest_point)
-                    .scale([scale, scale]),
-            )?;*/
+
+            // Skip to next tile if current tile is offscreen
+            if i < start_at {
+                continue;
+            }
+
+            // Draw current tile
             gl.draw(viewport, |c, gl| {
-                //let y = y - self.scroll_pos as f32;
                 let transform = c
                     .transform
-                    .trans(x.into(), y as f64)
+                    .trans(x as f64, y as f64)
                     .trans(0.0, -self.scroll_pos)
                     .zoom(scale.into());
                 let state = DrawState::default();
                 Image::new().draw(image, &state, transform, gl);
             });
+
+            // Draw outline around selected tile
+            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
+            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
             if i == self.selected_tile {
-                //let y = y - self.scroll_pos as f32;
                 gl.draw(viewport, |c, gl| {
                     let rect = graphics::rectangle::Rectangle::new_border(
                         self.tile_handler.highlight_color(*ii),
@@ -296,6 +293,8 @@ impl EventHandler for Grid<'_> {
                         gl,
                     );
                 });
+
+                // See if the window needs to be scrolled
                 if y as f64 + self.tile_height as f64 > self.scroll_pos + win_height as f64 {
                     move_win_by = height;
                 }
@@ -304,44 +303,40 @@ impl EventHandler for Grid<'_> {
                 }
             }
         }
+
+        // Trigger action if tile was clicked
         if launch {
             self.key_down_event(Key::Return, ModifierKey::NO_MODIFIER, false);
         }
-        if self.draw_tile {
-            // draw overlay
-            /*let rectangle = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                graphics::Rect::new(0.0, screen.y, screen.w, screen.h),
-                graphics::Color::from([1.0, 1.0, 1.0, 1.0]),
-            )?;
-            graphics::draw(ctx, &rectangle, (ggez::nalgebra::Point2::new(0.0, 0.0),))?;*/
 
-            // draw currently selected image
+        // Draw current image full screen
+        if self.draw_tile {
             // TODO: Move into Tile trait
             let image = &self
                 .tile_handler
                 .tile(self.tile_handler.tiles()[self.selected_tile]);
             let (width, height) = image.get_size();
-            /*let scale = f32::min(
-                screen.w / width as f32,
-                screen.h / height as f32,
-            );
-            let width = width as f32 * scale;
-            let height = height as f32 * scale;
-            let x = (screen.w - width) / 2.0;
-            let y = (screen.h - height) / 2.0 + screen.y;
-            let dest_point = mint::Point2 { x, y };
-            graphics::draw(
-                ctx,
-                *image,
-                graphics::DrawParam::default()
-                    .dest(dest_point)
-                    .scale([scale, scale]),
-            )?;*/
-        }
-        if !selection_changed {
-            //self.dirty = false;
+            let scale = f64::min(win_width / width as f64, win_height / height as f64);
+            let width = width as f64 * scale;
+            let height = height as f64 * scale;
+            let x = (win_width - width) / 2.0;
+            let y = (win_height - height) / 2.0;
+
+            // draw overlay and image
+            gl.draw(viewport, |c, gl| {
+                let rect = graphics::rectangle::Rectangle::new([1.0, 1.0, 1.0, 1.0]);
+                let transform = c.transform.trans(0.0, 0.0);
+                rect.draw(
+                    [0.0, 0.0, win_width, win_height],
+                    &Default::default(),
+                    transform,
+                    gl,
+                );
+
+                let transform = c.transform.trans(x as f64, y as f64).zoom(scale.into());
+                let state = DrawState::default();
+                Image::new().draw(*image, &state, transform, gl);
+            });
         }
         if move_win_by != 0.0 {
             self.scroll_pos += move_win_by as f64;
