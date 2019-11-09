@@ -3,6 +3,7 @@ use graphics::{DrawState, Graphics, Image, ImageSize, Transformed};
 use opengl_graphics::{GlGraphics, OpenGL, Texture};
 use piston::input::{
     keyboard::{Key, ModifierKey},
+    mouse::MouseButton,
     RenderArgs,
 };
 use std::cmp::{max, min};
@@ -172,8 +173,8 @@ pub trait EventHandler {
     fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()>;
     fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, repeat: bool);
     fn key_up_event(&mut self, keycode: Key, keymod: ModifierKey);
-    //fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32);
-    //fn mouse_wheel_event(&mut self, _x: f32, y: f32);
+    fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32);
+    fn mouse_wheel_event(&mut self, x: f32, y: f32);
 }
 
 impl EventHandler for Grid<'_> {
@@ -346,13 +347,12 @@ impl EventHandler for Grid<'_> {
         Ok(())
     }
 
-    /*fn mouse_button_up_event(&mut self, ctx: &mut Context, _button: MouseButton, x: f32, y: f32) {
-        let screen = graphics::screen_coordinates(ctx);
-        self.select_tile_under(x, y + screen.y);
+    fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32) {
+        self.select_tile_under(x, y);
         self.dirty = true;
     }
 
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, y: f32) {
+    fn mouse_wheel_event(&mut self, _x: f32, y: f32) {
         if y > 0.0 {
             if self.draw_tile {
                 self.left();
@@ -370,7 +370,7 @@ impl EventHandler for Grid<'_> {
             self.down();
         }
         self.dirty = true;
-    }*/
+    }
 
     fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, _repeat: bool) {
         let result = self
