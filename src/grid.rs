@@ -172,6 +172,7 @@ impl<'a> Grid<'a> {
         settings.max_fps(1);
         settings.ups(1);
         let mut events = Events::new(settings);
+        let mut modkeys = ModifierKey::NO_MODIFIER;
         while let Some(e) = events.next(window) {
             if let Some(r) = e.render_args() {
                 self.draw(gl, &r)?;
@@ -203,7 +204,8 @@ impl<'a> Grid<'a> {
             if let Some(p) = e.press_args() {
                 match p {
                     Button::Keyboard(key) => {
-                        self.key_down_event(key, ModifierKey::NO_MODIFIER, false);
+                        modkeys.event(&e);
+                        self.key_down_event(key, modkeys, false);
                     }
                     _ => {}
                 }
@@ -314,11 +316,14 @@ impl EventHandler for Grid<'_> {
                 continue;
             }
 
+            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
+            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
+
             // Draw current tile
             gl.draw(viewport, |c, gl| {
                 let transform = c
                     .transform
-                    .trans(x as f64, y as f64)
+                    .trans((x + x_image_margin) as f64, (y + y_image_margin) as f64)
                     .trans(0.0, -self.scroll_pos)
                     .zoom(scale.into());
                 let state = DrawState::default();
@@ -326,8 +331,6 @@ impl EventHandler for Grid<'_> {
             });
 
             // Draw outline around selected tile
-            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
-            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
             if i == self.selected_tile {
                 gl.draw(viewport, |c, gl| {
                     let rect = graphics::rectangle::Rectangle::new_border(
