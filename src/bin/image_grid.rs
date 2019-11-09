@@ -3,23 +3,13 @@ extern crate image_grid;
 use clap::{App, Arg};
 use glutin_window::GlutinWindow as Window;
 use image_grid::{
-    dispatcher,
-    grid::{self, EventHandler, Grid, GridResult, TileHandler},
+    grid::{Grid, GridResult, TileHandler},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
 use opengl_graphics::{GlGraphics, OpenGL};
-use piston::event_loop::*;
-use piston::input::{
-    keyboard::ModifierKey, Button, MouseCursorEvent, MouseScrollEvent, PressEvent, ReleaseEvent,
-    RenderEvent, UpdateEvent,
-};
 use piston::window::WindowSettings;
 use std::path::PathBuf;
-use std::thread;
-use std::time;
-
-trait Game {}
 
 struct ImageTileHandler {
     tiles: Vec<Texture>,
@@ -136,53 +126,6 @@ fn main() -> GridResult<()> {
             .parse::<u16>()
             .unwrap(),
     );
-
-    let mut settings = EventSettings::new();
-    settings.set_lazy(true);
-    settings.swap_buffers(true);
-    settings.max_fps(1);
-    settings.ups(1);
-    let mut last_pos = [0.0, 0.0];
-    let mut events = Events::new(settings);
-    while let Some(e) = events.next(&mut window) {
-        if let Some(r) = e.render_args() {
-            grid.draw(&mut gl, &r)?;
-        }
-
-        if let Some(_u) = e.update_args() {
-            grid.update(&mut gl)?;
-        }
-
-        if let Some(pos) = e.mouse_cursor_args() {
-            last_pos = pos;
-        }
-
-        if let Some(scroll) = e.mouse_scroll_args() {
-            grid.mouse_wheel_event(scroll[0] as f32, scroll[1] as f32);
-        }
-
-        if let Some(p) = e.release_args() {
-            match p {
-                Button::Mouse(button) => {
-                    grid.mouse_button_up_event(button, last_pos[0] as f32, last_pos[1] as f32)
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(p) = e.press_args() {
-            match p {
-                Button::Keyboard(key) => {
-                    grid.key_down_event(key, ModifierKey::NO_MODIFIER, false);
-                }
-                _ => {}
-            }
-        }
-    }
-    /*
-
-        graphics::set_resizable(&mut ctx, true)?;
-        event::run(&mut ctx, &mut event_loop, &mut grid)?;
-    */
+    grid.run(&mut window, &mut gl)?;
     Ok(())
 }

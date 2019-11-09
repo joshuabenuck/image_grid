@@ -1,11 +1,15 @@
 use failure::Error;
+use glutin_window::GlutinWindow as Window;
 use graphics::{DrawState, Graphics, Image, ImageSize, Transformed};
 use opengl_graphics::{GlGraphics, OpenGL, Texture};
+use piston::event_loop::*;
 use piston::input::{
     keyboard::{Key, ModifierKey},
     mouse::MouseButton,
-    RenderArgs,
+    Button, MouseCursorEvent, MouseScrollEvent, PressEvent, ReleaseEvent, RenderArgs, RenderEvent,
+    UpdateEvent,
 };
+use piston::window::WindowSettings;
 use std::cmp::{max, min};
 use std::process::Child;
 use std::thread;
@@ -62,6 +66,7 @@ pub struct Grid<'a> {
     dirty: bool,
     width: f64,
     scroll_pos: f64,
+    mouse_pos: [f64; 2],
 }
 
 impl<'a> Grid<'a> {
@@ -101,6 +106,7 @@ impl<'a> Grid<'a> {
             dirty: true,
             width: 0.0,
             scroll_pos: 0.0,
+            mouse_pos: [0.0, 0.0],
         }
     }
 
@@ -157,6 +163,53 @@ impl<'a> Grid<'a> {
         let width = width as f32 * scale;
         let height = height as f32 * scale;
         (scale, width, height)
+    }
+
+    pub fn run(&mut self, window: &mut Window, gl: &mut GlGraphics) -> Result<(), Error> {
+        let mut settings = EventSettings::new();
+        settings.set_lazy(true);
+        settings.swap_buffers(true);
+        settings.max_fps(1);
+        settings.ups(1);
+        let mut events = Events::new(settings);
+        while let Some(e) = events.next(window) {
+            if let Some(r) = e.render_args() {
+                self.draw(gl, &r)?;
+            }
+
+            if let Some(_u) = e.update_args() {
+                self.update(gl)?;
+            }
+
+            if let Some(pos) = e.mouse_cursor_args() {
+                self.mouse_pos = pos;
+            }
+
+            if let Some(scroll) = e.mouse_scroll_args() {
+                self.mouse_wheel_event(scroll[0] as f32, scroll[1] as f32);
+            }
+
+            if let Some(p) = e.release_args() {
+                match p {
+                    Button::Mouse(button) => self.mouse_button_up_event(
+                        button,
+                        self.mouse_pos[0] as f32,
+                        self.mouse_pos[1] as f32,
+                    ),
+                    _ => {}
+                }
+            }
+
+            if let Some(p) = e.press_args() {
+                match p {
+                    Button::Keyboard(key) => {
+                        self.key_down_event(key, ModifierKey::NO_MODIFIER, false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -348,7 +401,7 @@ impl EventHandler for Grid<'_> {
     }
 
     fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32) {
-        self.select_tile_under(x, y);
+        self.select_tile_under(x, y + self.scroll_pos as f32);
         self.dirty = true;
     }
 
