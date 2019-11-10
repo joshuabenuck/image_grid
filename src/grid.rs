@@ -201,10 +201,11 @@ impl<'a> Grid<'a> {
                 }
             }
 
+            modkeys.event(&e);
+
             if let Some(p) = e.press_args() {
                 match p {
                     Button::Keyboard(key) => {
-                        modkeys.event(&e);
                         self.key_down_event(key, modkeys, false);
                     }
                     _ => {}
