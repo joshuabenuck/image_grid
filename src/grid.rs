@@ -1,7 +1,7 @@
 use failure::Error;
 use glutin_window::GlutinWindow as Window;
-use graphics::{DrawState, Graphics, Image, ImageSize, Transformed};
-use opengl_graphics::{GlGraphics, OpenGL, Texture};
+use graphics::{DrawState, Image, ImageSize, Transformed};
+use opengl_graphics::{GlGraphics, Texture};
 use piston::event_loop::*;
 use piston::input::{
     keyboard::{Key, ModifierKey},
@@ -9,11 +9,9 @@ use piston::input::{
     Button, MouseCursorEvent, MouseScrollEvent, PressEvent, ReleaseEvent, RenderArgs, RenderEvent,
     UpdateEvent,
 };
-use piston::window::WindowSettings;
+use piston::window::AdvancedWindow;
 use std::cmp::{max, min};
 use std::process::Child;
-use std::thread;
-use std::time;
 
 pub type Color = [f32; 4];
 
@@ -23,6 +21,8 @@ pub enum TileAction {
 }
 
 pub trait TileHandler {
+    fn window_title(&self) -> String;
+
     fn tiles(&self) -> &Vec<usize>;
 
     fn tile(&self, i: usize) -> &Texture;
@@ -84,12 +84,6 @@ impl<'a> Grid<'a> {
         let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
         let tile_width = min(max_width, tile_width);
         let tile_height = min(max_height, tile_height);
-        println!(
-            "count {}, tile_width {}, tile_height {}",
-            tile_handler.tiles().len(),
-            tile_width,
-            tile_height
-        );
         Grid {
             tile_handler,
             margin: 5,
@@ -124,7 +118,6 @@ impl<'a> Grid<'a> {
         if self.tiles_per_row == 0 {
             self.tiles_per_row = 1;
         }
-        println!("tiles_per_row: {}", self.tiles_per_row);
     }
 
     fn compute_tile_size() {}
@@ -192,11 +185,14 @@ impl<'a> Grid<'a> {
 
             if let Some(p) = e.release_args() {
                 match p {
-                    Button::Mouse(button) => self.mouse_button_up_event(
-                        button,
-                        self.mouse_pos[0] as f32,
-                        self.mouse_pos[1] as f32,
-                    ),
+                    Button::Mouse(button) => {
+                        self.mouse_button_up_event(
+                            button,
+                            self.mouse_pos[0] as f32,
+                            self.mouse_pos[1] as f32,
+                        );
+                        window.set_title(self.tile_handler.window_title());
+                    }
                     _ => {}
                 }
             }
@@ -207,6 +203,7 @@ impl<'a> Grid<'a> {
                 match p {
                     Button::Keyboard(key) => {
                         self.key_down_event(key, modkeys, false);
+                        window.set_title(self.tile_handler.window_title());
                     }
                     _ => {}
                 }

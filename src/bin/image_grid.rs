@@ -17,6 +17,10 @@ struct ImageTileHandler {
 }
 
 impl TileHandler for ImageTileHandler {
+    fn window_title(&self) -> {
+        "Image Grid"
+    }
+
     fn tiles(&self) -> &Vec<usize> {
         return &self.indexes;
     }
