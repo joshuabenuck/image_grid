@@ -9,6 +9,7 @@ use image_grid::{
 use opengl_graphics::Texture;
 use opengl_graphics::{GlGraphics, OpenGL};
 use piston::window::WindowSettings;
+use std::io::{self, BufRead};
 use std::path::PathBuf;
 
 struct ImageTileHandler {
@@ -17,8 +18,8 @@ struct ImageTileHandler {
 }
 
 impl TileHandler for ImageTileHandler {
-    fn window_title(&self) -> {
-        "Image Grid"
+    fn window_title(&self) -> String {
+        "Image Grid".to_string()
     }
 
     fn tiles(&self) -> &Vec<usize> {
@@ -38,8 +39,12 @@ fn main() -> GridResult<()> {
                 .long("dir")
                 .short("d")
                 .takes_value(true)
-                .required(true)
                 .help("The directory to display."),
+        )
+        .arg(
+            Arg::with_name("stdin")
+                .long("stdin")
+                .help("Read files to display from stdin"),
         )
         .arg(
             Arg::with_name("max")
@@ -112,9 +117,25 @@ fn main() -> GridResult<()> {
     let mut gl = GlGraphics::new(opengl);
     //let mut app = ImageViewerApp { gl, rotation: 0.0 };
 
-    let tiles = loader.load_all(PathBuf::from(
-        matches.value_of("dir").expect("Must specify a directory!"),
-    ))?;
+    let tiles = if matches.is_present("dir") {
+        loader.load_all(PathBuf::from(
+            matches.value_of("dir").expect("Must specify a directory!"),
+        ))?
+    } else if matches.is_present("stdin") {
+        let mut files: Vec<PathBuf> = Vec::new();
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let file = PathBuf::from(line?);
+            if !file.exists() {
+                eprintln!("Skipping: {}", &file.display());
+                continue;
+            }
+            files.push(file);
+        }
+        loader.load_files(files)?
+    } else {
+        panic!("Must specify either --dir or --stdin. See --help for details.");
+    };
     let indexes = (0..tiles.len()).collect();
     let mut handler = ImageTileHandler { tiles, indexes };
     let mut grid = Grid::new(

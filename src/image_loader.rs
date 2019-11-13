@@ -39,8 +39,16 @@ impl ImageLoader {
     }
 
     pub fn load_all(&self, path: PathBuf) -> GridResult<Vec<Texture>> {
+        let files = path
+            .read_dir()?
+            .filter(Result::is_ok)
+            .map(|f| f.unwrap().path())
+            .collect();
+        self.load_files(files)
+    }
+
+    pub fn load_files(&self, files: Vec<PathBuf>) -> GridResult<Vec<Texture>> {
         let mut images = Vec::new();
-        let files = path.read_dir()?;
         let mut count = 0;
         let must_not_match: Vec<Regex> = self
             .must_not_match
@@ -53,7 +61,6 @@ impl ImageLoader {
             .map(|f| Regex::new(f).expect(format!("Regex error for 'only': {}", f).as_str()))
             .collect();
         'fileloop: for file in files {
-            let file = file?.path();
             // Is there a way to do this more concisely?
             if let Some(max) = self.max_count {
                 if count >= max {
