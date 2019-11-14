@@ -38,7 +38,7 @@ impl ImageLoader {
         self.max_count = Some(max);
     }
 
-    pub fn load_all(&self, path: PathBuf) -> GridResult<Vec<Texture>> {
+    pub fn load_all(&self, path: PathBuf) -> GridResult<(Vec<String>, Vec<Texture>)> {
         let files = path
             .read_dir()?
             .filter(Result::is_ok)
@@ -47,7 +47,8 @@ impl ImageLoader {
         self.load_files(files)
     }
 
-    pub fn load_files(&self, files: Vec<PathBuf>) -> GridResult<Vec<Texture>> {
+    pub fn load_files(&self, files: Vec<PathBuf>) -> GridResult<(Vec<String>, Vec<Texture>)> {
+        let mut loaded_files = Vec::new();
         let mut images = Vec::new();
         let mut count = 0;
         let must_not_match: Vec<Regex> = self
@@ -90,12 +91,13 @@ impl ImageLoader {
             match image {
                 Ok(i) => {
                     count += 1;
+                    loaded_files.push(file.to_str().unwrap().to_owned());
                     images.push(i);
                 }
                 Err(err) => eprintln!("{}: {}", file.display(), err),
             }
         }
-        Ok(images)
+        Ok((loaded_files, images))
     }
 
     fn load(&self, file: &PathBuf) -> GridResult<Texture> {

@@ -3,7 +3,7 @@ extern crate image_grid;
 use clap::{App, Arg};
 use glutin_window::GlutinWindow as Window;
 use image_grid::{
-    grid::{Grid, GridResult, TileHandler},
+    grid::{Grid, GridResult, TileAction, TileHandler},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
@@ -13,6 +13,7 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 
 struct ImageTileHandler {
+    filenames: Vec<String>,
     tiles: Vec<Texture>,
     indexes: Vec<usize>,
 }
@@ -28,6 +29,11 @@ impl TileHandler for ImageTileHandler {
 
     fn tile(&self, i: usize) -> &Texture {
         &self.tiles[i]
+    }
+
+    fn act(&self, i: usize) -> TileAction {
+        println!("{}", self.filenames[i]);
+        TileAction::None
     }
 }
 
@@ -85,6 +91,13 @@ fn main() -> GridResult<()> {
                 .default_value("200")
                 .help("Set the max tile-width."),
         )
+        .arg(
+            Arg::with_name("draw-tile")
+                .long("draw-tile")
+                .takes_value(true)
+                .default_value("true")
+                .help("Whether to draw tile fullscreen when activating a tile."),
+        )
         .get_matches();
 
     let mut loader = ImageLoader::new();
@@ -117,7 +130,7 @@ fn main() -> GridResult<()> {
     let mut gl = GlGraphics::new(opengl);
     //let mut app = ImageViewerApp { gl, rotation: 0.0 };
 
-    let tiles = if matches.is_present("dir") {
+    let (files, tiles) = if matches.is_present("dir") {
         loader.load_all(PathBuf::from(
             matches.value_of("dir").expect("Must specify a directory!"),
         ))?
@@ -137,7 +150,11 @@ fn main() -> GridResult<()> {
         panic!("Must specify either --dir or --stdin. See --help for details.");
     };
     let indexes = (0..tiles.len()).collect();
-    let mut handler = ImageTileHandler { tiles, indexes };
+    let mut handler = ImageTileHandler {
+        filenames: files,
+        tiles,
+        indexes,
+    };
     let mut grid = Grid::new(
         Box::new(&mut handler),
         matches
@@ -151,6 +168,10 @@ fn main() -> GridResult<()> {
             .parse::<u16>()
             .unwrap(),
     );
+    let draw_tile = matches.value_of("draw-tile").unwrap().parse::<bool>()?;
+    if !draw_tile {
+        grid.allow_draw_tile = false;
+    }
     grid.run(&mut window, &mut gl)?;
     Ok(())
 }
