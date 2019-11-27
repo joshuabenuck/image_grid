@@ -20,8 +20,62 @@ pub enum TileAction {
     Launch(Result<Child, Error>),
 }
 
+pub struct TileState {
+    width: u16,
+    height: u16,
+    scale: f32,
+}
+
+impl TileState {
+    fn update_size(&mut self, image: &Texture, w_h: f32, h_h: f32) -> (f32, f32) {
+        (0.0, 0.0)
+    }
+}
+
 pub trait TileHandler {
     fn window_title(&self) -> String;
+
+    fn tile_size(&self) -> (u16, u16) {
+        self.compute_tile_size()
+    };
+
+    fn tile_size_hint(&self) -> (u16, u16);
+
+    fn compute_size(&self, i: usize, w: f32, h: f32) -> (f32, f32, f32) {
+        let (width, height) = self.tile(i).get_size();
+        let scale = f32::min(w / width as f32, h / height as f32);
+        let width = width as f32 * scale;
+        let height = height as f32 * scale;
+        (scale, width, height)
+    }
+
+    fn compute_tile_size(&self) -> (u16, u16) {
+        let mut current_width = 0;
+        let mut current_height = 0;
+        for index in self.tiles() {
+            (current_width, current_height) = self._compute_tile_size(index, current_width, current_height);
+        }
+    }
+
+    fn _compute_tile_size(&self, i: usize, c_w: f32, c_h: f32) -> (u16, u16) {
+        let image = self.tile_handler.tile(i);
+        let (max_tile_width, max_tile_height) = self.tile_size_hint();
+        // Vec<(scale, width, height)>
+        let (_scale, width, height) = self.compute_size(
+            image,
+            max_tile_width as f32,
+            max_tile_height as f32,
+        );
+        let mut tile_width = self.tile_width;
+        if width > c_w {
+            tile_width = min(width as u16, self.max_tile_width);
+        }
+        let mut tile_height = self.tile_height;
+        if height > c_h {
+            tile_height = min(height as u16, self.max_tile_height);
+        }
+        (tile_width, tile_height)
+    }
 
     fn tiles(&self) -> &Vec<usize>;
 
@@ -53,6 +107,8 @@ pub trait TileHandler {
 pub struct Grid<'a> {
     pub tile_handler: Box<&'a mut dyn TileHandler>,
     margin: usize,
+    max_tile_width: u16,
+    max_tile_height: u16,
     tile_width: u16,
     tile_height: u16,
     border_margin: usize,
@@ -63,7 +119,6 @@ pub struct Grid<'a> {
     coords_to_select: Option<(f32, f32)>,
     draw_tile: bool,
     pub allow_draw_tile: bool,
-    dirty: bool,
     width: f64,
     scroll_pos: f64,
     mouse_pos: [f64; 2],
@@ -75,20 +130,13 @@ impl<'a> Grid<'a> {
         tile_width: u16,
         tile_height: u16,
     ) -> Grid {
-        let images = tile_handler.tiles().iter().map(|i| tile_handler.tile(*i));
-        // Vec<(scale, width, height)>
-        let sizes: Vec<(f32, f32, f32)> = images
-            .map(|i| Grid::compute_size(i, tile_width as f32, tile_height as f32))
-            .collect();
-        let max_width = (&sizes).iter().map(|size| size.1).fold(0.0, f32::max) as u16;
-        let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
-        let tile_width = min(max_width, tile_width);
-        let tile_height = min(max_height, tile_height);
-        Grid {
+        let mut grid = Grid {
             tile_handler,
             margin: 5,
-            tile_width,
-            tile_height,
+            max_tile_width: tile_width,
+            max_tile_height: tile_height,
+            tile_width: 0,
+            tile_height: 0,
             border_margin: 20,
             selected_tile: 0,
             highlight_border: 2,
@@ -97,15 +145,23 @@ impl<'a> Grid<'a> {
             coords_to_select: None,
             draw_tile: false,
             allow_draw_tile: true,
-            dirty: true,
             width: 0.0,
             scroll_pos: 0.0,
             mouse_pos: [0.0, 0.0],
+        };
+        let mut tmp_tile_width = tile_width;
+        let mut tmp_tile_height = tile_height;
+        for i in grid.tile_handler.tiles() {
+            let result = grid.compute_max_size(*i, tmp_tile_width as f32, tmp_tile_height as f32);
+            tmp_tile_width = result.0;
+            tmp_tile_height = result.1;
         }
+        grid.tile_width = tmp_tile_width;
+        grid.tile_height = tmp_tile_height;
+        grid
     }
 
     fn resize(&mut self, new_width: f32) {
-        self.dirty = true;
         let remaining_width = new_width as usize - self.border_margin * 2 + self.margin;
         let tile_margin_width = self.tile_width as usize + self.margin;
         // TODO: tiles per row and margin to center do not handle case where
@@ -119,10 +175,6 @@ impl<'a> Grid<'a> {
             self.tiles_per_row = 1;
         }
     }
-
-    fn compute_tile_size() {}
-
-    fn scroll_by() {}
 
     fn up(&mut self) {
         self.selected_tile = max(
@@ -148,14 +200,6 @@ impl<'a> Grid<'a> {
 
     fn select_tile_under(&mut self, x: f32, y: f32) {
         self.coords_to_select = Some((x, y));
-    }
-
-    fn compute_size(image: &Texture, w: f32, h: f32) -> (f32, f32, f32) {
-        let (width, height) = image.get_size();
-        let scale = f32::min(w / width as f32, h / height as f32);
-        let width = width as f32 * scale;
-        let height = height as f32 * scale;
-        (scale, width, height)
     }
 
     pub fn run(&mut self, window: &mut Window, gl: &mut GlGraphics) -> Result<(), Error> {
@@ -242,10 +286,6 @@ impl EventHandler for Grid<'_> {
     }
 
     fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()> {
-        if !self.dirty {
-            return Ok(());
-        }
-
         // handle window resize
         let [win_width, win_height] = args.window_size;
         if win_width != self.width {
@@ -274,8 +314,12 @@ impl EventHandler for Grid<'_> {
             self.selected_tile = tiles.len() - 1;
         }
         let mut launch = false;
-
+        let mut tile_width = self.tile_width;
+        let mut tile_height = self.tile_height;
         for (i, ii) in tiles.iter().enumerate() {
+            let result = self.compute_max_size(*ii, tile_width as f32, tile_height as f32);
+            tile_width = result.0;
+            tile_height = result.1;
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
                 Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
@@ -358,6 +402,8 @@ impl EventHandler for Grid<'_> {
                 }
             }
         }
+        self.tile_width = tile_width;
+        self.tile_height = tile_height;
 
         // Trigger action if tile was clicked
         if launch {
@@ -395,7 +441,6 @@ impl EventHandler for Grid<'_> {
         }
         if move_win_by != 0.0 {
             self.scroll_pos += move_win_by as f64;
-            self.dirty = true;
         }
 
         Ok(())
@@ -403,14 +448,12 @@ impl EventHandler for Grid<'_> {
 
     fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32) {
         self.select_tile_under(x, y + self.scroll_pos as f32);
-        self.dirty = true;
     }
 
     fn mouse_wheel_event(&mut self, _x: f32, y: f32) {
         if y > 0.0 {
             if self.draw_tile {
                 self.left();
-                self.dirty = true;
                 return;
             }
             self.up();
@@ -418,12 +461,10 @@ impl EventHandler for Grid<'_> {
         if y < 0.0 {
             if self.draw_tile {
                 self.right();
-                self.dirty = true;
                 return;
             }
             self.down();
         }
-        self.dirty = true;
     }
 
     fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, _repeat: bool) {
@@ -431,7 +472,6 @@ impl EventHandler for Grid<'_> {
             .tile_handler
             .key_down(self.selected_tile, keycode, keymod);
         if let None = result {
-            self.dirty = true;
             return;
         }
         let (keycode, keymod) = result.unwrap();
@@ -466,7 +506,6 @@ impl EventHandler for Grid<'_> {
             Key::Escape => {
                 if self.draw_tile {
                     self.draw_tile = false;
-                    self.dirty = true;
                 } else {
                     //ggez::event::quit(ctx);
                 }
@@ -475,7 +514,6 @@ impl EventHandler for Grid<'_> {
                 return ();
             }
         }
-        self.dirty = true;
     }
 
     fn key_up_event(&mut self, keycode: Key, _keymod: ModifierKey) {
