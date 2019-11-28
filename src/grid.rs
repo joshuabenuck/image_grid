@@ -1,5 +1,6 @@
 use failure::Error;
 use glutin_window::GlutinWindow as Window;
+use graphics::math::Matrix2d;
 use graphics::{DrawState, Image, ImageSize, Transformed};
 use opengl_graphics::{GlGraphics, Texture};
 use piston::event_loop::*;
@@ -48,6 +49,67 @@ pub trait TileHandler {
     ) -> Option<(Key, ModifierKey)> {
         return Some((keycode, keymod));
     }
+
+    fn compute_size(&self, image: &Texture, w: usize, h: usize) -> (f64, usize, usize) {
+        let (width, height) = image.get_size();
+        let scale = f64::min(w as f64 / width as f64, h as f64 / height as f64);
+        let width = width as f64 * scale;
+        let height = height as f64 * scale;
+        (scale, width as usize, height as usize)
+    }
+
+    fn draw_tile(
+        &self,
+        i: usize,
+        transform: Matrix2d,
+        gl: &mut GlGraphics,
+        target_width: usize,
+        target_height: usize,
+    ) {
+        let image = self.tile(i);
+        let (scale, width, height) = self.compute_size(image, target_width, target_height);
+        let x_image_margin = (target_width - width) / 2;
+        let y_image_margin = (target_height - height) / 2;
+
+        let state = DrawState::default();
+        Image::new().draw(
+            image,
+            &state,
+            transform
+                .trans(x_image_margin as f64, y_image_margin as f64)
+                .zoom(scale.into()),
+            gl,
+        );
+        let rect = graphics::rectangle::Rectangle::new([1.0, 0.5, 1.0, 1.0]);
+        let transform = transform.trans(50.0, 0.0);
+        rect.draw([0.0, 0.0, 50.0, 50.0], &state, transform, gl);
+    }
+
+    fn draw_outline(
+        &self,
+        i: usize,
+        transform: Matrix2d,
+        gl: &mut GlGraphics,
+        target_width: usize,
+        target_height: usize,
+    ) {
+        let image = self.tile(i);
+        let (_scale, width, height) = self.compute_size(image, target_width, target_height);
+        let x_image_margin = (target_width - width) / 2;
+        let y_image_margin = (target_height - height) / 2;
+        let rect = graphics::rectangle::Rectangle::new_border(self.highlight_color(i), 2.0);
+        rect.draw(
+            [
+                x_image_margin as f64,
+                y_image_margin as f64,
+                width as f64,
+                height as f64,
+            ],
+            &Default::default(),
+            transform,
+            gl,
+        );
+    }
 }
 
 // margin: the total space between items the grid
@@ -58,7 +120,6 @@ pub struct Grid<'a> {
     tile_height: usize,
     border_margin: usize,
     selected_tile: usize,
-    highlight_border: usize,
     tiles_per_row: usize,
     margin_to_center: usize,
     coords_to_select: Option<(f64, f64)>,
@@ -76,10 +137,11 @@ impl<'a> Grid<'a> {
         tile_width: usize,
         tile_height: usize,
     ) -> Grid {
-        let images = tile_handler.tiles().iter().map(|i| tile_handler.tile(*i));
         // Vec<(scale, width, height)>
-        let sizes: Vec<(f64, usize, usize)> = images
-            .map(|i| Grid::compute_size(i, tile_width, tile_height))
+        let sizes: Vec<(f64, usize, usize)> = tile_handler
+            .tiles()
+            .iter()
+            .map(|i| tile_handler.compute_size(tile_handler.tile(*i), tile_width, tile_height))
             .collect();
         let max_width = (&sizes).iter().map(|size| size.1).fold(0, max) as usize;
         let max_height = (&sizes).iter().map(|size| size.2).fold(0, max) as usize;
@@ -92,7 +154,6 @@ impl<'a> Grid<'a> {
             tile_height,
             border_margin: 20,
             selected_tile: 0,
-            highlight_border: 2,
             tiles_per_row: 10,
             margin_to_center: 0,
             coords_to_select: None,
@@ -145,14 +206,6 @@ impl<'a> Grid<'a> {
 
     fn select_tile_under(&mut self, x: f64, y: f64) {
         self.coords_to_select = Some((x, y));
-    }
-
-    fn compute_size(image: &Texture, w: usize, h: usize) -> (f64, usize, usize) {
-        let (width, height) = image.get_size();
-        let scale = f64::min(w as f64 / width as f64, h as f64 / height as f64);
-        let width = width as f64 * scale;
-        let height = height as f64 * scale;
-        (scale, width as usize, height as usize)
     }
 
     pub fn run(&mut self, window: &mut Window, gl: &mut GlGraphics) -> Result<(), Error> {
@@ -235,9 +288,6 @@ impl<'a> Grid<'a> {
         let mut launch = false;
 
         for (i, ii) in tiles.iter().enumerate() {
-            let image = self.tile_handler.tile(*ii);
-            let (scale, width, height) =
-                Grid::compute_size(image, self.tile_width, self.tile_height);
             x = (self.margin_to_center
                 + self.border_margin
                 + i % self.tiles_per_row * self.tile_width
@@ -273,47 +323,32 @@ impl<'a> Grid<'a> {
                 continue;
             }
 
-            let x_image_margin = (self.tile_width - width) / 2;
-            let y_image_margin = (self.tile_height - height) / 2;
-
             // Draw current tile
             gl.draw(viewport, |c, gl| {
-                let transform = c
-                    .transform
-                    .trans(x + x_image_margin as f64, y + y_image_margin as f64)
-                    .trans(0.0, -self.scroll_pos)
-                    .zoom(scale.into());
-                let state = DrawState::default();
-                Image::new().draw(image, &state, transform, gl);
+                let transform = c.transform.trans(x, y).trans(0.0, -self.scroll_pos);
+                self.tile_handler
+                    .draw_tile(*ii, transform, gl, self.tile_width, self.tile_height);
             });
 
             // Draw outline around selected tile
             if i == self.selected_tile {
                 gl.draw(viewport, |c, gl| {
-                    let rect = graphics::rectangle::Rectangle::new_border(
-                        self.tile_handler.highlight_color(*ii),
-                        self.highlight_border as f64,
-                    );
-                    let transform = c.transform.trans(0.0, 0.0).trans(0.0, -self.scroll_pos);
-                    rect.draw(
-                        [
-                            x + x_image_margin as f64,
-                            y + y_image_margin as f64,
-                            width as f64,
-                            height as f64,
-                        ],
-                        &Default::default(),
+                    let transform = c.transform.trans(x, y).trans(0.0, -self.scroll_pos);
+                    self.tile_handler.draw_outline(
+                        *ii,
                         transform,
                         gl,
+                        self.tile_width,
+                        self.tile_height,
                     );
                 });
 
                 // See if the window needs to be scrolled
                 if y + self.tile_height as f64 > self.scroll_pos + win_height as f64 {
-                    move_win_by = height as f64;
+                    move_win_by = self.tile_height as f64;
                 }
                 if (y as f64) < self.scroll_pos {
-                    move_win_by = -(height as f64);
+                    move_win_by = -(self.tile_height as f64);
                 }
             }
         }
@@ -325,17 +360,6 @@ impl<'a> Grid<'a> {
 
         // Draw current image full screen
         if self.draw_tile {
-            // TODO: Move into Tile trait
-            let image = &self
-                .tile_handler
-                .tile(self.tile_handler.tiles()[self.selected_tile]);
-            let (width, height) = image.get_size();
-            let scale = f64::min(win_width / width as f64, win_height / height as f64);
-            let width = width as f64 * scale;
-            let height = height as f64 * scale;
-            let x = (win_width - width) / 2.0;
-            let y = (win_height - height) / 2.0;
-
             // draw overlay and image
             gl.draw(viewport, |c, gl| {
                 let rect = graphics::rectangle::Rectangle::new([1.0, 1.0, 1.0, 1.0]);
@@ -347,9 +371,13 @@ impl<'a> Grid<'a> {
                     gl,
                 );
 
-                let transform = c.transform.trans(x as f64, y as f64).zoom(scale.into());
-                let state = DrawState::default();
-                Image::new().draw(*image, &state, transform, gl);
+                self.tile_handler.draw_tile(
+                    self.tile_handler.tiles()[self.selected_tile],
+                    c.transform,
+                    gl,
+                    win_width as usize,
+                    win_height as usize,
+                );
             });
         }
         if move_win_by != 0.0 {
