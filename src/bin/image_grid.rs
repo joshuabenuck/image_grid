@@ -1,9 +1,10 @@
 extern crate image_grid;
 
 use clap::{App, Arg};
+use env_logger;
 use glutin_window::GlutinWindow as Window;
 use image_grid::{
-    grid::{Grid, GridResult, TileAction, TileHandler},
+    grid::{run, GridController, GridModel, GridResult, GridView, TileController},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
@@ -12,17 +13,17 @@ use piston::window::WindowSettings;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 
-struct ImageTileHandler {
+struct ImageTile {}
+
+impl TileController for ImageTile {}
+
+struct Images {
     filenames: Vec<String>,
     tiles: Vec<Texture>,
     indexes: Vec<usize>,
 }
 
-impl TileHandler for ImageTileHandler {
-    fn window_title(&self) -> String {
-        "Image Grid".to_string()
-    }
-
+impl GridModel for Images {
     fn tiles(&self) -> &Vec<usize> {
         return &self.indexes;
     }
@@ -30,14 +31,10 @@ impl TileHandler for ImageTileHandler {
     fn tile(&self, i: usize) -> &Texture {
         &self.tiles[i]
     }
-
-    fn act(&self, i: usize) -> TileAction {
-        println!("{}", self.filenames[i]);
-        TileAction::None
-    }
 }
 
 fn main() -> GridResult<()> {
+    env_logger::init();
     let matches = App::new("image_grid")
         .about("Utility to display images in a directory in a grid.")
         .arg(
@@ -149,29 +146,30 @@ fn main() -> GridResult<()> {
     } else {
         panic!("Must specify either --dir or --stdin. See --help for details.");
     };
-    let indexes = (0..tiles.len()).collect();
-    let mut handler = ImageTileHandler {
+    let indexes: Vec<usize> = (0..tiles.len()).collect();
+    let model: Box<dyn GridModel> = Box::new(Images {
         filenames: files,
         tiles,
         indexes,
-    };
-    let mut grid = Grid::new(
-        Box::new(&mut handler),
+    });
+    let mut controller = GridController::new(model, ImageTile {});
+
+    let mut view = GridView::new(
         matches
             .value_of("tile-width")
             .unwrap()
-            .parse::<u16>()
+            .parse::<usize>()
             .unwrap(),
         matches
             .value_of("tile-height")
             .unwrap()
-            .parse::<u16>()
+            .parse::<usize>()
             .unwrap(),
     );
     let draw_tile = matches.value_of("draw-tile").unwrap().parse::<bool>()?;
     if !draw_tile {
-        grid.allow_draw_tile = false;
+        controller.allow_draw_tile = false;
     }
-    grid.run(&mut window, &mut gl)?;
+    run(&mut window, &mut gl, &mut controller, &mut view)?;
     Ok(())
 }
