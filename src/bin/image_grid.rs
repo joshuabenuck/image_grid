@@ -160,12 +160,12 @@ fn main() -> GridResult<()> {
         matches
             .value_of("tile-width")
             .unwrap()
-            .parse::<u16>()
+            .parse::<usize>()
             .unwrap(),
         matches
             .value_of("tile-height")
             .unwrap()
-            .parse::<u16>()
+            .parse::<usize>()
             .unwrap(),
     );
     let draw_tile = matches.value_of("draw-tile").unwrap().parse::<bool>()?;

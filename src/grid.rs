@@ -7,11 +7,12 @@ use piston::input::{
     keyboard::{Key, ModifierKey},
     mouse::MouseButton,
     Button, MouseCursorEvent, MouseScrollEvent, PressEvent, ReleaseEvent, RenderArgs, RenderEvent,
-    UpdateEvent,
 };
 use piston::window::AdvancedWindow;
 use std::cmp::{max, min};
 use std::process::Child;
+
+pub type GridResult<T> = Result<T, Error>;
 
 pub type Color = [f32; 4];
 
@@ -53,14 +54,14 @@ pub trait TileHandler {
 pub struct Grid<'a> {
     pub tile_handler: Box<&'a mut dyn TileHandler>,
     margin: usize,
-    tile_width: u16,
-    tile_height: u16,
+    tile_width: usize,
+    tile_height: usize,
     border_margin: usize,
     selected_tile: usize,
     highlight_border: usize,
     tiles_per_row: usize,
     margin_to_center: usize,
-    coords_to_select: Option<(f32, f32)>,
+    coords_to_select: Option<(f64, f64)>,
     draw_tile: bool,
     pub allow_draw_tile: bool,
     dirty: bool,
@@ -72,16 +73,16 @@ pub struct Grid<'a> {
 impl<'a> Grid<'a> {
     pub fn new(
         tile_handler: Box<&'a mut dyn TileHandler>,
-        tile_width: u16,
-        tile_height: u16,
+        tile_width: usize,
+        tile_height: usize,
     ) -> Grid {
         let images = tile_handler.tiles().iter().map(|i| tile_handler.tile(*i));
         // Vec<(scale, width, height)>
-        let sizes: Vec<(f32, f32, f32)> = images
-            .map(|i| Grid::compute_size(i, tile_width as f32, tile_height as f32))
+        let sizes: Vec<(f64, usize, usize)> = images
+            .map(|i| Grid::compute_size(i, tile_width, tile_height))
             .collect();
-        let max_width = (&sizes).iter().map(|size| size.1).fold(0.0, f32::max) as u16;
-        let max_height = (&sizes).iter().map(|size| size.2).fold(0.0, f32::max) as u16;
+        let max_width = (&sizes).iter().map(|size| size.1).fold(0, max) as usize;
+        let max_height = (&sizes).iter().map(|size| size.2).fold(0, max) as usize;
         let tile_width = min(max_width, tile_width);
         let tile_height = min(max_height, tile_height);
         Grid {
@@ -104,9 +105,9 @@ impl<'a> Grid<'a> {
         }
     }
 
-    fn resize(&mut self, new_width: f32) {
+    fn resize(&mut self, new_width: usize) {
         self.dirty = true;
-        let remaining_width = new_width as usize - self.border_margin * 2 + self.margin;
+        let remaining_width = new_width - self.border_margin * 2 + self.margin;
         let tile_margin_width = self.tile_width as usize + self.margin;
         // TODO: tiles per row and margin to center do not handle case where
         // tiles per row is greater than the number of tiles to display which
@@ -119,10 +120,6 @@ impl<'a> Grid<'a> {
             self.tiles_per_row = 1;
         }
     }
-
-    fn compute_tile_size() {}
-
-    fn scroll_by() {}
 
     fn up(&mut self) {
         self.selected_tile = max(
@@ -146,16 +143,16 @@ impl<'a> Grid<'a> {
         self.selected_tile = min(self.tile_handler.tiles().len() - 1, self.selected_tile + 1);
     }
 
-    fn select_tile_under(&mut self, x: f32, y: f32) {
+    fn select_tile_under(&mut self, x: f64, y: f64) {
         self.coords_to_select = Some((x, y));
     }
 
-    fn compute_size(image: &Texture, w: f32, h: f32) -> (f32, f32, f32) {
+    fn compute_size(image: &Texture, w: usize, h: usize) -> (f64, usize, usize) {
         let (width, height) = image.get_size();
-        let scale = f32::min(w / width as f32, h / height as f32);
-        let width = width as f32 * scale;
-        let height = height as f32 * scale;
-        (scale, width, height)
+        let scale = f64::min(w as f64 / width as f64, h as f64 / height as f64);
+        let width = width as f64 * scale;
+        let height = height as f64 * scale;
+        (scale, width as usize, height as usize)
     }
 
     pub fn run(&mut self, window: &mut Window, gl: &mut GlGraphics) -> Result<(), Error> {
@@ -171,10 +168,6 @@ impl<'a> Grid<'a> {
                 self.draw(gl, &r)?;
             }
 
-            if let Some(_u) = e.update_args() {
-                self.update(gl)?;
-            }
-
             if let Some(pos) = e.mouse_cursor_args() {
                 self.mouse_pos = pos;
             }
@@ -186,11 +179,7 @@ impl<'a> Grid<'a> {
             if let Some(p) = e.release_args() {
                 match p {
                     Button::Mouse(button) => {
-                        self.mouse_button_up_event(
-                            button,
-                            self.mouse_pos[0] as f32,
-                            self.mouse_pos[1] as f32,
-                        );
+                        self.mouse_button_up_event(button, self.mouse_pos[0], self.mouse_pos[1]);
                         window.set_title(self.tile_handler.window_title());
                     }
                     _ => {}
@@ -211,35 +200,6 @@ impl<'a> Grid<'a> {
         }
         Ok(())
     }
-}
-
-/*impl Widget for Grid<'_> {
-    fn next(&self) -> NextAction {
-        return NextAction::None;
-    }
-}*/
-
-pub type GridResult<T> = Result<T, Error>;
-
-pub trait EventHandler {
-    fn update(&mut self, gl: &mut GlGraphics) -> GridResult<()>;
-    fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()>;
-    fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, repeat: bool);
-    fn key_up_event(&mut self, keycode: Key, keymod: ModifierKey);
-    fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32);
-    fn mouse_wheel_event(&mut self, x: f32, y: f32);
-}
-
-impl EventHandler for Grid<'_> {
-    fn update(&mut self, _gl: &mut GlGraphics) -> GridResult<()> {
-        const DESIRED_FPS: u32 = 20;
-        //while timer::check_update_time(ctx, DESIRED_FPS) {
-        //println!("Delta frame time: {:?} ", timer::delta(ctx));
-        //println!("Average FPS: {}", timer::fps(ctx));
-        //thread::sleep(time::Duration::from_millis(1000 / 40));
-        //}
-        Ok(())
-    }
 
     fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()> {
         if !self.dirty {
@@ -249,7 +209,7 @@ impl EventHandler for Grid<'_> {
         // handle window resize
         let [win_width, win_height] = args.window_size;
         if win_width != self.width {
-            self.resize(win_width as f32);
+            self.resize(win_width as usize);
             self.width = win_width;
         }
         let viewport = args.viewport();
@@ -259,11 +219,10 @@ impl EventHandler for Grid<'_> {
             use graphics::clear;
             clear(self.tile_handler.background_color(), gl);
         });
-        let mut x;
-        let mut y = self.border_margin as f32;
-        let mut start_at = (viewport.rect[1] as usize)
-            / (self.tile_height as usize + self.margin) as usize
-            * self.tiles_per_row;
+        let mut x: f64;
+        let mut y: f64 = self.border_margin as f64;
+        let mut start_at =
+            (viewport.rect[1] as usize) / (self.tile_height + self.margin) * self.tiles_per_row;
         let row_of_selection: usize = self.selected_tile / self.tiles_per_row;
         if start_at > row_of_selection {
             start_at = row_of_selection;
@@ -278,18 +237,18 @@ impl EventHandler for Grid<'_> {
         for (i, ii) in tiles.iter().enumerate() {
             let image = self.tile_handler.tile(*ii);
             let (scale, width, height) =
-                Grid::compute_size(image, self.tile_width as f32, self.tile_height as f32);
+                Grid::compute_size(image, self.tile_width, self.tile_height);
             x = (self.margin_to_center
                 + self.border_margin
-                + i % self.tiles_per_row * self.tile_width as usize
-                + i % self.tiles_per_row * self.margin) as f32;
+                + i % self.tiles_per_row * self.tile_width
+                + i % self.tiles_per_row * self.margin) as f64;
 
             // Increment y when we start a new row
             if i != 0 && i % self.tiles_per_row == 0 {
-                y += (self.margin + self.tile_height as usize) as f32;
+                y += (self.margin + self.tile_height) as f64;
 
                 // Optimization to only draw a single page of images
-                if i > self.selected_tile && y > (self.scroll_pos as f32 + win_height as f32) {
+                if i > self.selected_tile && y > (self.scroll_pos + win_height) as f64 {
                     break;
                 }
             }
@@ -297,9 +256,9 @@ impl EventHandler for Grid<'_> {
             // Handle mouse selection of tiles
             if let Some((x_coord, y_coord)) = self.coords_to_select {
                 if x_coord >= x
-                    && x_coord <= x + self.tile_width as f32
+                    && x_coord <= x + self.tile_width as f64
                     && y_coord >= y
-                    && y_coord <= y + self.tile_height as f32
+                    && y_coord <= y + self.tile_height as f64
                 {
                     if self.selected_tile == i {
                         launch = true;
@@ -314,14 +273,14 @@ impl EventHandler for Grid<'_> {
                 continue;
             }
 
-            let x_image_margin = (self.tile_width as f32 - width) / 2.0;
-            let y_image_margin = (self.tile_height as f32 - height) / 2.0;
+            let x_image_margin = (self.tile_width - width) / 2;
+            let y_image_margin = (self.tile_height - height) / 2;
 
             // Draw current tile
             gl.draw(viewport, |c, gl| {
                 let transform = c
                     .transform
-                    .trans((x + x_image_margin) as f64, (y + y_image_margin) as f64)
+                    .trans(x + x_image_margin as f64, y + y_image_margin as f64)
                     .trans(0.0, -self.scroll_pos)
                     .zoom(scale.into());
                 let state = DrawState::default();
@@ -338,8 +297,8 @@ impl EventHandler for Grid<'_> {
                     let transform = c.transform.trans(0.0, 0.0).trans(0.0, -self.scroll_pos);
                     rect.draw(
                         [
-                            (x + x_image_margin) as f64,
-                            (y + y_image_margin) as f64,
+                            x + x_image_margin as f64,
+                            y + y_image_margin as f64,
                             width as f64,
                             height as f64,
                         ],
@@ -350,11 +309,11 @@ impl EventHandler for Grid<'_> {
                 });
 
                 // See if the window needs to be scrolled
-                if y as f64 + self.tile_height as f64 > self.scroll_pos + win_height as f64 {
-                    move_win_by = height;
+                if y + self.tile_height as f64 > self.scroll_pos + win_height as f64 {
+                    move_win_by = height as f64;
                 }
                 if (y as f64) < self.scroll_pos {
-                    move_win_by = -height;
+                    move_win_by = -(height as f64);
                 }
             }
         }
@@ -394,15 +353,15 @@ impl EventHandler for Grid<'_> {
             });
         }
         if move_win_by != 0.0 {
-            self.scroll_pos += move_win_by as f64;
+            self.scroll_pos += move_win_by;
             self.dirty = true;
         }
 
         Ok(())
     }
 
-    fn mouse_button_up_event(&mut self, _button: MouseButton, x: f32, y: f32) {
-        self.select_tile_under(x, y + self.scroll_pos as f32);
+    fn mouse_button_up_event(&mut self, _button: MouseButton, x: f64, y: f64) {
+        self.select_tile_under(x, y + self.scroll_pos);
         self.dirty = true;
     }
 
@@ -476,13 +435,5 @@ impl EventHandler for Grid<'_> {
             }
         }
         self.dirty = true;
-    }
-
-    fn key_up_event(&mut self, keycode: Key, _keymod: ModifierKey) {
-        match keycode {
-            _ => {
-                return ();
-            }
-        }
     }
 }
