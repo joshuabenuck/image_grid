@@ -50,8 +50,8 @@ pub trait TileHandler {
         return Some((keycode, keymod));
     }
 
-    fn compute_size(&self, image: &Texture, w: usize, h: usize) -> (f64, usize, usize) {
-        let (width, height) = image.get_size();
+    fn compute_size(&self, i: usize, w: usize, h: usize) -> (f64, usize, usize) {
+        let (width, height) = self.tile(i).get_size();
         let scale = f64::min(w as f64 / width as f64, h as f64 / height as f64);
         let width = width as f64 * scale;
         let height = height as f64 * scale;
@@ -67,7 +67,7 @@ pub trait TileHandler {
         target_height: usize,
     ) {
         let image = self.tile(i);
-        let (scale, width, height) = self.compute_size(image, target_width, target_height);
+        let (scale, width, height) = self.compute_size(i, target_width, target_height);
         let x_image_margin = (target_width - width) / 2;
         let y_image_margin = (target_height - height) / 2;
 
@@ -80,9 +80,6 @@ pub trait TileHandler {
                 .zoom(scale.into()),
             gl,
         );
-        let rect = graphics::rectangle::Rectangle::new([1.0, 0.5, 1.0, 1.0]);
-        let transform = transform.trans(50.0, 0.0);
-        rect.draw([0.0, 0.0, 50.0, 50.0], &state, transform, gl);
     }
 
     fn draw_outline(
@@ -93,8 +90,7 @@ pub trait TileHandler {
         target_width: usize,
         target_height: usize,
     ) {
-        let image = self.tile(i);
-        let (_scale, width, height) = self.compute_size(image, target_width, target_height);
+        let (_scale, width, height) = self.compute_size(i, target_width, target_height);
         let x_image_margin = (target_width - width) / 2;
         let y_image_margin = (target_height - height) / 2;
         let rect = graphics::rectangle::Rectangle::new_border(self.highlight_color(i), 2.0);
@@ -141,7 +137,7 @@ impl<'a> Grid<'a> {
         let sizes: Vec<(f64, usize, usize)> = tile_handler
             .tiles()
             .iter()
-            .map(|i| tile_handler.compute_size(tile_handler.tile(*i), tile_width, tile_height))
+            .map(|i| tile_handler.compute_size(*i, tile_width, tile_height))
             .collect();
         let max_width = (&sizes).iter().map(|size| size.1).fold(0, max) as usize;
         let max_height = (&sizes).iter().map(|size| size.2).fold(0, max) as usize;
