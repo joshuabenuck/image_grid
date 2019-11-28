@@ -16,29 +16,26 @@ pub type Color = [f32; 4];
 pub type GridResult<T> = Result<T, Error>;
 
 pub trait GridModel {
+    fn window_title(&self) -> String;
     fn tiles(&self) -> &Vec<usize>;
     fn tile(&self, i: usize) -> &Texture;
+    fn act(&self, i: usize);
 }
 
-// pub struct TileController {
-//     act: Box<dyn FnMut(usize) -> bool>,
-// }
-pub trait TileController {}
-
-pub struct GridController<T: TileController> {
-    tile_controller: T,
+pub struct GridController {
     model: Box<dyn GridModel>,
     selected_tile: usize,
     coords_to_select: Option<(f64, f64)>,
     pub allow_draw_tile: bool,
     draw_tile: bool,
     mouse_pos: [f64; 2],
+    tiles_per_row: usize,
 }
 
-impl<T: TileController> GridController<T> {
-    pub fn new(model: Box<dyn GridModel>, tile_controller: T) -> GridController<T> {
+impl GridController {
+    pub fn new(model: Box<dyn GridModel>) -> GridController {
         GridController {
-            tile_controller,
+            tiles_per_row: 10,
             model,
             selected_tile: 0,
             coords_to_select: None,
@@ -49,18 +46,17 @@ impl<T: TileController> GridController<T> {
     }
 
     fn up(&mut self) {
-        /*self.selected_tile = max(
+        self.selected_tile = max(
             0 as isize,
             self.selected_tile as isize - self.tiles_per_row as isize,
-        ) as usize;*/
+        ) as usize;
     }
 
     fn down(&mut self) {
-        /*
         self.selected_tile = min(
-            self.tile_handler.tiles().len() - 1,
+            self.model.tiles().len() - 1,
             self.selected_tile + self.tiles_per_row,
-        );*/
+        );
     }
 
     fn left(&mut self) {
@@ -122,7 +118,7 @@ impl<T: TileController> GridController<T> {
                 if self.allow_draw_tile && !self.draw_tile {
                     self.draw_tile = true;
                 } else {
-                    //self.act(self.model.tiles()[self.selected_tile]);
+                    self.model.act(self.model.tiles()[self.selected_tile]);
                 }
             }
             Key::Home => {
@@ -146,7 +142,6 @@ impl<T: TileController> GridController<T> {
 }
 
 pub struct GridView {
-    tiles_per_row: usize,
     tile_width: usize,
     tile_height: usize,
     margin: usize,
@@ -161,7 +156,6 @@ pub struct GridView {
 impl GridView {
     pub fn new(tile_width: usize, tile_height: usize) -> GridView {
         GridView {
-            tiles_per_row: 10,
             tile_width: 0,
             tile_height: 0,
             margin: 5,
@@ -174,13 +168,9 @@ impl GridView {
         }
     }
 
-    fn window_title(&self) -> String {
-        "Image Grid".to_string()
-    }
-
-    fn compute_size<T: TileController>(
+    fn compute_size(
         &self,
-        c: &GridController<T>,
+        c: &GridController,
         i: usize,
         w: usize,
         h: usize,
@@ -192,7 +182,7 @@ impl GridView {
         (scale, width as usize, height as usize)
     }
 
-    fn compute_tile_size<T: TileController>(&self, c: &GridController<T>) -> (usize, usize) {
+    fn compute_tile_size(&self, c: &GridController) -> (usize, usize) {
         let mut current_size = (0, 0);
         for index in c.model.tiles() {
             current_size = self._compute_tile_size(c, *index, current_size.0, current_size.1);
@@ -201,9 +191,9 @@ impl GridView {
         current_size
     }
 
-    fn _compute_tile_size<T: TileController>(
+    fn _compute_tile_size(
         &self,
-        c: &GridController<T>,
+        c: &GridController,
         i: usize,
         c_w: usize,
         c_h: usize,
@@ -223,29 +213,29 @@ impl GridView {
         (tile_width, tile_height)
     }
 
-    fn resize(&mut self, new_width: f64) {
+    fn resize(&mut self, new_width: f64) -> usize {
         let remaining_width = new_width as usize - self.border_margin * 2 + self.margin;
         let tile_margin_width = self.tile_width as usize + self.margin;
         // TODO: tiles per row and margin to center do not handle case where
         // tiles per row is greater than the number of tiles to display which
         // leads to a not fully centered grid since all tiles can fit on a single
         // row.
-        self.tiles_per_row = remaining_width / tile_margin_width;
+        let mut tiles_per_row = remaining_width / tile_margin_width;
         self.margin_to_center = remaining_width % tile_margin_width / 2;
         // minimum tiles per row is 1 regardless of window size
-        if self.tiles_per_row == 0 {
-            self.tiles_per_row = 1;
+        if tiles_per_row == 0 {
+            tiles_per_row = 1;
         }
-        trace!("Tiles per row: {}", self.tiles_per_row);
+        trace!("Tiles per row: {}", tiles_per_row);
+        tiles_per_row
     }
 
-    fn draw<T: TileController>(
+    fn draw(
         &mut self,
         gl: &mut GlGraphics,
         args: &RenderArgs,
-        c: &mut GridController<T>,
+        c: &mut GridController,
     ) -> GridResult<()> {
-        // TODO: Any way to only do this when necessary?
         let size = self.compute_tile_size(c);
         self.tile_width = size.0;
         self.tile_height = size.1;
@@ -253,7 +243,7 @@ impl GridView {
         // handle window resize
         let [win_width, win_height] = args.window_size;
         if win_width != self.width {
-            self.resize(win_width);
+            c.tiles_per_row = self.resize(win_width);
             self.width = win_width;
         }
         let viewport = args.viewport();
@@ -267,8 +257,8 @@ impl GridView {
         let mut y: f64 = self.border_margin as f64;
         let mut start_at = (viewport.rect[1] as usize)
             / (self.tile_height as usize + self.margin) as usize
-            * self.tiles_per_row;
-        let row_of_selection: usize = c.selected_tile / self.tiles_per_row;
+            * c.tiles_per_row;
+        let row_of_selection: usize = c.selected_tile / c.tiles_per_row;
         if start_at > row_of_selection {
             start_at = row_of_selection;
         }
@@ -278,22 +268,17 @@ impl GridView {
             c.selected_tile = tiles.len() - 1;
         }
         let mut launch = false;
-        // let mut tile_width = self.tile_width;
-        // let mut tile_height = self.tile_height;
-        // let result = self._compute_tile_size(*ii, tile_width, tile_height);
-        // tile_width = result.0;
-        // tile_height = result.1;
         for (i, ii) in tiles.iter().enumerate() {
             let image = c.model.tile(*ii);
             let (scale, width, height) =
                 self.compute_size(c, *ii, self.tile_width, self.tile_height);
             x = (self.margin_to_center
                 + self.border_margin
-                + i % self.tiles_per_row * self.tile_width
-                + i % self.tiles_per_row * self.margin) as f64;
+                + i % c.tiles_per_row * self.tile_width
+                + i % c.tiles_per_row * self.margin) as f64;
 
             // Increment y when we start a new row
-            if i != 0 && i % self.tiles_per_row == 0 {
+            if i != 0 && i % c.tiles_per_row == 0 {
                 y += (self.margin + self.tile_height) as f64;
 
                 // Optimization to only draw a single page of images
@@ -366,8 +351,6 @@ impl GridView {
                 }
             }
         }
-        // self.tile_width = tile_width;
-        // self.tile_height = tile_height;
 
         // Trigger action if tile was clicked
         if launch {
@@ -417,10 +400,10 @@ impl GridView {
     }
 }
 
-pub fn run<T: TileController>(
+pub fn run(
     window: &mut Window,
     gl: &mut GlGraphics,
-    controller: &mut GridController<T>,
+    controller: &mut GridController,
     view: &mut GridView,
 ) -> Result<(), Error> {
     let mut settings = EventSettings::new();
@@ -451,7 +434,7 @@ pub fn run<T: TileController>(
                         controller.mouse_pos[0],
                         controller.mouse_pos[1],
                     );
-                    window.set_title(view.window_title());
+                    window.set_title(controller.model.window_title());
                 }
                 _ => {}
             }
@@ -463,7 +446,7 @@ pub fn run<T: TileController>(
             match p {
                 Button::Keyboard(key) => {
                     controller.key_down_event(key, modkeys, false);
-                    window.set_title(view.window_title());
+                    window.set_title(controller.model.window_title());
                 }
                 _ => {}
             }

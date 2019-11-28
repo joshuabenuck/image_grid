@@ -4,7 +4,7 @@ use clap::{App, Arg};
 use env_logger;
 use glutin_window::GlutinWindow as Window;
 use image_grid::{
-    grid::{run, GridController, GridModel, GridResult, GridView, TileController},
+    grid::{run, GridController, GridModel, GridResult, GridView},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
@@ -13,10 +13,6 @@ use piston::window::WindowSettings;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 
-struct ImageTile {}
-
-impl TileController for ImageTile {}
-
 struct Images {
     filenames: Vec<String>,
     tiles: Vec<Texture>,
@@ -24,12 +20,20 @@ struct Images {
 }
 
 impl GridModel for Images {
+    fn window_title(&self) -> String {
+        "Image Grid".to_string()
+    }
+
     fn tiles(&self) -> &Vec<usize> {
         return &self.indexes;
     }
 
     fn tile(&self, i: usize) -> &Texture {
         &self.tiles[i]
+    }
+
+    fn act(&self, i: usize) {
+        println!("{}", self.filenames[i]);
     }
 }
 
@@ -152,7 +156,7 @@ fn main() -> GridResult<()> {
         tiles,
         indexes,
     });
-    let mut controller = GridController::new(model, ImageTile {});
+    let mut controller = GridController::new(model);
 
     let mut view = GridView::new(
         matches
