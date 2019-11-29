@@ -11,16 +11,10 @@ use piston::input::{
 };
 use piston::window::AdvancedWindow;
 use std::cmp::{max, min};
-use std::process::Child;
 
 pub type GridResult<T> = Result<T, Error>;
 
 pub type Color = [f32; 4];
-
-pub enum TileAction {
-    None,
-    Launch(Result<Child, Error>),
-}
 
 pub trait TileHandler {
     fn window_title(&self) -> String;
@@ -29,9 +23,7 @@ pub trait TileHandler {
 
     fn tile(&self, i: usize) -> &Texture;
 
-    fn act(&self, _i: usize) -> TileAction {
-        TileAction::None
-    }
+    fn act(&mut self, _i: usize) {}
 
     fn highlight_color(&self, _i: usize) -> Color {
         [1.0, 1.0, 1.0, 1.0]
@@ -50,8 +42,21 @@ pub trait TileHandler {
         return Some((keycode, keymod));
     }
 
-    fn compute_size(&self, i: usize, w: usize, h: usize) -> (f64, usize, usize) {
-        let (width, height) = self.tile(i).get_size();
+    fn key_up(
+        &mut self,
+        _i: usize,
+        keycode: Key,
+        keymod: ModifierKey,
+    ) -> Option<(Key, ModifierKey)> {
+        return Some((keycode, keymod));
+    }
+
+    fn compute_size_by_index(&self, i: usize, w: usize, h: usize) -> (f64, usize, usize) {
+        self.compute_size(self.tile(i), w, h)
+    }
+
+    fn compute_size(&self, image: &Texture, w: usize, h: usize) -> (f64, usize, usize) {
+        let (width, height) = image.get_size();
         let scale = f64::min(w as f64 / width as f64, h as f64 / height as f64);
         let width = width as f64 * scale;
         let height = height as f64 * scale;
@@ -67,7 +72,7 @@ pub trait TileHandler {
         target_height: usize,
     ) {
         let image = self.tile(i);
-        let (scale, width, height) = self.compute_size(i, target_width, target_height);
+        let (scale, width, height) = self.compute_size_by_index(i, target_width, target_height);
         let x_image_margin = (target_width - width) / 2;
         let y_image_margin = (target_height - height) / 2;
 
@@ -90,7 +95,7 @@ pub trait TileHandler {
         target_width: usize,
         target_height: usize,
     ) {
-        let (_scale, width, height) = self.compute_size(i, target_width, target_height);
+        let (_scale, width, height) = self.compute_size_by_index(i, target_width, target_height);
         let x_image_margin = (target_width - width) / 2;
         let y_image_margin = (target_height - height) / 2;
         let rect = graphics::rectangle::Rectangle::new_border(self.highlight_color(i), 2.0);
@@ -121,7 +126,6 @@ pub struct Grid<'a> {
     coords_to_select: Option<(f64, f64)>,
     draw_tile: bool,
     pub allow_draw_tile: bool,
-    dirty: bool,
     width: f64,
     scroll_pos: f64,
     mouse_pos: [f64; 2],
@@ -137,7 +141,7 @@ impl<'a> Grid<'a> {
         let sizes: Vec<(f64, usize, usize)> = tile_handler
             .tiles()
             .iter()
-            .map(|i| tile_handler.compute_size(*i, tile_width, tile_height))
+            .map(|i| tile_handler.compute_size_by_index(*i, tile_width, tile_height))
             .collect();
         let max_width = (&sizes).iter().map(|size| size.1).fold(0, max) as usize;
         let max_height = (&sizes).iter().map(|size| size.2).fold(0, max) as usize;
@@ -155,7 +159,6 @@ impl<'a> Grid<'a> {
             coords_to_select: None,
             draw_tile: false,
             allow_draw_tile: true,
-            dirty: true,
             width: 0.0,
             scroll_pos: 0.0,
             mouse_pos: [0.0, 0.0],
@@ -163,7 +166,6 @@ impl<'a> Grid<'a> {
     }
 
     fn resize(&mut self, new_width: usize) {
-        self.dirty = true;
         let remaining_width = new_width - self.border_margin * 2 + self.margin;
         let tile_margin_width = self.tile_width as usize + self.margin;
         // TODO: tiles per row and margin to center do not handle case where
@@ -227,6 +229,9 @@ impl<'a> Grid<'a> {
 
             if let Some(p) = e.release_args() {
                 match p {
+                    Button::Keyboard(key) => {
+                        self.key_up_event(key, modkeys);
+                    }
                     Button::Mouse(button) => {
                         self.mouse_button_up_event(button, self.mouse_pos[0], self.mouse_pos[1]);
                         window.set_title(self.tile_handler.window_title());
@@ -251,10 +256,6 @@ impl<'a> Grid<'a> {
     }
 
     fn draw(&mut self, gl: &mut GlGraphics, args: &RenderArgs) -> GridResult<()> {
-        if !self.dirty {
-            return Ok(());
-        }
-
         // handle window resize
         let [win_width, win_height] = args.window_size;
         if win_width != self.width {
@@ -378,7 +379,6 @@ impl<'a> Grid<'a> {
         }
         if move_win_by != 0.0 {
             self.scroll_pos += move_win_by;
-            self.dirty = true;
         }
 
         Ok(())
@@ -386,14 +386,12 @@ impl<'a> Grid<'a> {
 
     fn mouse_button_up_event(&mut self, _button: MouseButton, x: f64, y: f64) {
         self.select_tile_under(x, y + self.scroll_pos);
-        self.dirty = true;
     }
 
     fn mouse_wheel_event(&mut self, _x: f32, y: f32) {
         if y > 0.0 {
             if self.draw_tile {
                 self.left();
-                self.dirty = true;
                 return;
             }
             self.up();
@@ -401,12 +399,19 @@ impl<'a> Grid<'a> {
         if y < 0.0 {
             if self.draw_tile {
                 self.right();
-                self.dirty = true;
                 return;
             }
             self.down();
         }
-        self.dirty = true;
+    }
+
+    fn key_up_event(&mut self, keycode: Key, keymod: ModifierKey) {
+        let result = self
+            .tile_handler
+            .key_up(self.selected_tile, keycode, keymod);
+        if let None = result {
+            return;
+        }
     }
 
     fn key_down_event(&mut self, keycode: Key, keymod: ModifierKey, _repeat: bool) {
@@ -414,7 +419,6 @@ impl<'a> Grid<'a> {
             .tile_handler
             .key_down(self.selected_tile, keycode, keymod);
         if let None = result {
-            self.dirty = true;
             return;
         }
         let (keycode, keymod) = result.unwrap();
@@ -449,7 +453,6 @@ impl<'a> Grid<'a> {
             Key::Escape => {
                 if self.draw_tile {
                     self.draw_tile = false;
-                    self.dirty = true;
                 } else {
                     //ggez::event::quit(ctx);
                 }
@@ -458,6 +461,5 @@ impl<'a> Grid<'a> {
                 return ();
             }
         }
-        self.dirty = true;
     }
 }
