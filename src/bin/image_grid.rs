@@ -3,7 +3,7 @@ extern crate image_grid;
 use clap::{App, Arg};
 use glutin_window::GlutinWindow as Window;
 use image_grid::{
-    grid::{Grid, GridResult, TileAction, TileHandler},
+    grid::{Grid, GridResult, TileHandler},
     image_loader::ImageLoader,
 };
 use opengl_graphics::Texture;
@@ -31,9 +31,8 @@ impl TileHandler for ImageTileHandler {
         &self.tiles[i]
     }
 
-    fn act(&self, i: usize) -> TileAction {
+    fn act(&mut self, i: usize) {
         println!("{}", self.filenames[i]);
-        TileAction::None
     }
 }
 
