@@ -1,13 +1,6 @@
 use crate::grid::GridResult;
-use failure::{err_msg, Error};
-use find_folder;
-use graphics::ImageSize;
-use image::imageops;
 use opengl_graphics::{Texture, TextureSettings};
-use piston::window::Window;
 use regex::Regex;
-use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 
 pub struct ImageLoader {
@@ -101,28 +94,25 @@ impl ImageLoader {
     }
 
     fn load(&self, file: &PathBuf) -> GridResult<Texture> {
-        let texture = Texture::from_path(&file, &TextureSettings::new());
-        match texture {
-            Ok(t) => Ok(t),
-            Err(msg) => Err(err_msg(msg)),
-        }
-    }
+        let contents = std::fs::read(file).expect("Unable to read file");
+        let img = image::load_from_memory(&contents)?;
+        let img = match img {
+            image::DynamicImage::ImageRgba8(img) => img,
+            x => x.to_rgba(),
+        };
+        // TODO: Uncomment once full size display is working
+        // Resize to reduce GPU memory consumption
+        // let scale = f32::min(
+        //     200.0 as f32 / img.width() as f32,
+        //     200.0 as f32 / img.height() as f32,
+        // );
+        // let img = image::imageops::resize(
+        //     &img,
+        //     (img.width() as f32 * scale) as u32,
+        //     (img.height() as f32 * scale) as u32,
+        //     image::imageops::FilterType::Gaussian,
+        // );
 
-    /*fn load_and_resize(
-        &self,
-        ctx: &mut Context,
-        file: &PathBuf,
-        max_width: f32,
-    ) -> GameResult<graphics::Image> {
-        let image = self.load_file(ctx, file)?;
-        let scale: f32 = max_width / image.width() as f32;
-        let image = imageops::resize(
-            &image,
-            (image.width() as f32 * scale) as u32,
-            (image.height() as f32 * scale) as u32,
-            image::imageops::FilterType::Nearest,
-        );
-        let (width, height) = image.dimensions();
-        graphics::Image::from_rgba8(ctx, width as u16, height as u16, &image)
-    }*/
+        Ok(Texture::from_image(&img, &TextureSettings::new()))
+    }
 }

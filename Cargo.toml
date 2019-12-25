@@ -1,6 +1,6 @@
 [package]
 name = "image_grid"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Joshua Benuck <joshua_benuck@yahoo.com>"]
 edition = "2018"
 
@@ -11,7 +11,6 @@ name = "image_grid"
 path = "src/lib.rs"
 
 [dependencies]
-ggez = "*"
 piston = "*"
 piston2d-graphics = "*"
 pistoncore-glutin_window = "*"
