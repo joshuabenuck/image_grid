@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::Error;
 use glutin_window::GlutinWindow as Window;
 use graphics::math::Matrix2d;
 use graphics::{DrawState, Image, ImageSize, Transformed};
