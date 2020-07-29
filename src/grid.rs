@@ -1,4 +1,5 @@
 use anyhow::Error;
+use gilrs::{Button as GamepadButton, Event, EventType, Gilrs};
 use glutin_window::GlutinWindow as Window;
 use graphics::math::Matrix2d;
 use graphics::{DrawState, Image, ImageSize, Transformed};
@@ -208,48 +209,83 @@ impl<'a> Grid<'a> {
 
     pub fn run(&mut self, window: &mut Window, gl: &mut GlGraphics) -> Result<(), Error> {
         let mut settings = EventSettings::new();
-        settings.set_lazy(true);
+        settings.set_lazy(false);
         settings.swap_buffers(true);
         settings.max_fps(1);
         settings.ups(1);
         let mut events = Events::new(settings);
         let mut modkeys = ModifierKey::NO_MODIFIER;
-        while let Some(e) = events.next(window) {
-            if let Some(r) = e.render_args() {
-                self.draw(gl, &r)?;
-            }
-
-            if let Some(pos) = e.mouse_cursor_args() {
-                self.mouse_pos = pos;
-            }
-
-            if let Some(scroll) = e.mouse_scroll_args() {
-                self.mouse_wheel_event(scroll[0] as f32, scroll[1] as f32);
-            }
-
-            if let Some(p) = e.release_args() {
-                match p {
-                    Button::Keyboard(key) => {
-                        self.key_up_event(key, modkeys);
-                    }
-                    Button::Mouse(button) => {
-                        self.mouse_button_up_event(button, self.mouse_pos[0], self.mouse_pos[1]);
-                        window.set_title(self.tile_handler.window_title());
-                    }
-                    _ => {}
+        let mut gilrs = Gilrs::new().unwrap();
+        loop {
+            if let Some(e) = events.next(window) {
+                if let Some(r) = e.render_args() {
+                    self.draw(gl, &r)?;
                 }
-            }
 
-            modkeys.event(&e);
-
-            if let Some(p) = e.press_args() {
-                match p {
-                    Button::Keyboard(key) => {
-                        self.key_down_event(key, modkeys, false);
-                        window.set_title(self.tile_handler.window_title());
-                    }
-                    _ => {}
+                if let Some(pos) = e.mouse_cursor_args() {
+                    self.mouse_pos = pos;
                 }
+
+                if let Some(scroll) = e.mouse_scroll_args() {
+                    self.mouse_wheel_event(scroll[0] as f32, scroll[1] as f32);
+                }
+
+                if let Some(p) = e.release_args() {
+                    match p {
+                        Button::Keyboard(key) => {
+                            self.key_up_event(key, modkeys);
+                        }
+                        Button::Mouse(button) => {
+                            self.mouse_button_up_event(
+                                button,
+                                self.mouse_pos[0],
+                                self.mouse_pos[1],
+                            );
+                            window.set_title(self.tile_handler.window_title());
+                        }
+                        _ => {}
+                    }
+                }
+
+                modkeys.event(&e);
+
+                if let Some(p) = e.press_args() {
+                    match p {
+                        Button::Keyboard(key) => {
+                            self.key_down_event(key, modkeys, false);
+                            window.set_title(self.tile_handler.window_title());
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                break;
+            }
+            if let Some(Event {
+                id: _id,
+                event,
+                time: _time,
+            }) = gilrs.next_event()
+            {
+                // println!("{:?} New event from {}: {:?}", time, id, event);
+                match event {
+                    EventType::ButtonPressed(button, _) => {
+                        let key = match button {
+                            GamepadButton::DPadDown => Some(Key::Down),
+                            GamepadButton::DPadUp => Some(Key::Up),
+                            GamepadButton::DPadLeft => Some(Key::Left),
+                            GamepadButton::DPadRight => Some(Key::Right),
+                            GamepadButton::South => Some(Key::Return),
+                            _ => None,
+                        };
+                        if let Some(key) = key {
+                            self.key_down_event(key, ModifierKey::NO_MODIFIER, false);
+                            window.set_title(self.tile_handler.window_title());
+                        }
+                    }
+                    EventType::AxisChanged(_axis, _distance, _) => {}
+                    _ => {}
+                };
             }
         }
         Ok(())
